@@ -16,7 +16,8 @@
     "webserver",
     "nodejs",
     "expressjs",
-    "BLE"
+    "BLE",
+    "noble"
   ],
   "author": "Robert Blaakmeer <r.m.blaakmeer@gmail.com>",
   "license": "Apache-2.0",
@@ -25,6 +26,7 @@
   },
   "homepage": "https://github.com/rblaakmeer/BLE2WebSvc#readme",
   "dependencies": {
-    "express": "*"
+    "express": "*",
+    "noble": "*"
   }
 }
