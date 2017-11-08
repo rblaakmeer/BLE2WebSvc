@@ -1,6 +1,3 @@
-require('./noble-master/test');
-
-/*
 var noble = require('noble');
 
 console.log('noble');
@@ -118,4 +115,3 @@ noble.on('discover', function(peripheral) {
 
   peripheral.connect();
 });
-*/
