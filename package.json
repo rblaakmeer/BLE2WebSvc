@@ -27,6 +27,6 @@
   "homepage": "https://github.com/rblaakmeer/BLE2WebSvc#readme",
   "dependencies": {
     "express": "*",
-    "noble": "*",
+    "noble": "*"
   }
 }
