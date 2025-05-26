@@ -4,7 +4,7 @@
   "description": "An Expressjs Web server as a bridge between BLE and Webservices on resin.io",
   "main": "server.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "jest",
     "start": "node server.js"
   },
   "repository": {
@@ -28,5 +28,9 @@
   "dependencies": {
     "express": "*",
     "noble": "*"
+  },
+  "devDependencies": {
+    "jest": "^29.0.0",
+    "supertest": "^6.3.3"
   }
 }
