@@ -1,5 +1,5 @@
 // __tests__/ble-manager.test.js
-const nobleMock = require('noble'); // Jest uses __mocks__/noble.js
+const nobleMock = require('@abandonware/noble'); // Jest uses __mocks__/@abandonware/noble.js
 const MockPeripheral = nobleMock.Peripheral; // Get the MockPeripheral class from the mock
 
 let bleManager;
