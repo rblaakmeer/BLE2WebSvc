@@ -2,9 +2,9 @@
  * @file ble-manager.js
  * @description Manages Bluetooth Low Energy (BLE) interactions, including device discovery,
  * connection, disconnection, and data exchange (services, characteristics).
- * It uses the 'noble' library for BLE communication.
+ * It uses the '@abandonware/noble' library for BLE communication.
  */
-var noble = require('noble');
+const noble = require('@abandonware/noble'); // Changed to @abandonware/noble
 
 console.log('noble'); // Initial log to indicate noble module is being processed.
 

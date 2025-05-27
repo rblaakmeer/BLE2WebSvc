@@ -27,7 +27,7 @@
   "homepage": "https://github.com/rblaakmeer/BLE2WebSvc#readme",
   "dependencies": {
     "express": "^4.19.2",
-    "noble": "^1.9.1"
+    "@abandonware/noble": "^1.9.2-20"
   },
   "devDependencies": {
     "jest": "^29.7.0",

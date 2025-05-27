@@ -19,10 +19,10 @@ module.exports = {
   // Automatically clear mock calls and instances between every test
   clearMocks: true,
 
-  // Setup a mock for the 'noble' library
+  // Setup a mock for the '@abandonware/noble' library
   // This tells Jest to look for a manual mock in a __mocks__ directory
-  // when 'noble' is required in tests.
+  // when '@abandonware/noble' is required in tests.
   moduleNameMapper: {
-    "^noble$": "<rootDir>/__mocks__/noble.js"
+    "^@abandonware/noble$": "<rootDir>/__mocks__/@abandonware/noble.js"
   }
 };
