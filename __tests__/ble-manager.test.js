@@ -94,6 +94,7 @@ describe('ble-Manager', () => {
       );
       expect(bleManager.connectedPeripherals['conn-id1']).toBe(mockPeripheral);
       expect(mockPeripheral.discoverAllServicesAndCharacteristics).toHaveBeenCalledTimes(1);
+      await new Promise(resolve => setImmediate(resolve)); // Added line
     });
 
     it('should reject if peripheral connect call fails', async () => {
@@ -122,6 +123,7 @@ describe('ble-Manager', () => {
       
       await expect(bleManager.connectDevice('conn-id1')).rejects.toThrow('Failed to discover services/characteristics: Discovery Failed');
       expect(bleManager.connectedPeripherals['conn-id1']).toBeUndefined(); // Should be removed if discovery fails
+      await new Promise(resolve => setImmediate(resolve)); // Added line
     });
 
     it('should reject if trying to connect to a non-existent peripheral', async () => {
@@ -133,6 +135,8 @@ describe('ble-Manager', () => {
       await bleManager.connectDevice('conn-id1');
       // Try connecting again
       await expect(bleManager.connectDevice('conn-id1')).rejects.toThrow('Peripheral already connected or connecting');
+      // Adding setImmediate here as well, as it involves a resolved promise from connectDevice
+      await new Promise(resolve => setImmediate(resolve));
     });
     
     it('should reject if peripheral disconnects during connection attempt', async () => {
@@ -155,6 +159,8 @@ describe('ble-Manager', () => {
       await bleManager.connectDevice('disconn-id1');
       // Clear mock calls from the connection part
       mockPeripheral.disconnect.mockClear(); 
+      // Ensure connectDevice's async operations complete before disconnect tests run
+      await new Promise(resolve => setImmediate(resolve)); 
     });
 
     it('should disconnect from a connected peripheral', async () => {
@@ -166,6 +172,7 @@ describe('ble-Manager', () => {
         expect.objectContaining({ id: 'disconn-id1', message: 'Disconnected successfully' })
       );
       expect(bleManager.connectedPeripherals['disconn-id1']).toBeUndefined();
+      await new Promise(resolve => setImmediate(resolve)); 
     });
 
     it('should reject if peripheral disconnect call fails', async () => {
@@ -176,10 +183,12 @@ describe('ble-Manager', () => {
       // Peripheral might still be in connectedPeripherals if only the callback errored
       // depending on how noble handles this. For our ble-manager, it would still be there.
       expect(bleManager.connectedPeripherals['disconn-id1']).toBe(mockPeripheral); 
+      await new Promise(resolve => setImmediate(resolve)); 
     });
 
     it('should reject if trying to disconnect a non-connected peripheral ID', async () => {
       await expect(bleManager.disconnectDevice('non-existent-id')).rejects.toThrow('Peripheral not connected or not found');
+      await new Promise(resolve => setImmediate(resolve)); 
     });
   });
 
@@ -233,6 +242,8 @@ describe('ble-Manager', () => {
         c.read.mockClear();
         c.write.mockClear();
       }));
+      // Ensure connectDevice's async operations complete before service/char tests run
+      await new Promise(resolve => setImmediate(resolve));
     });
 
     describe('getServices', () => {
@@ -240,10 +251,12 @@ describe('ble-Manager', () => {
         const services = await bleManager.getServices(peripheralId);
         expect(services).toHaveLength(1);
         expect(services[0]).toEqual(expect.objectContaining({ uuid: serviceUuid1 }));
+        await new Promise(resolve => setImmediate(resolve));
       });
 
       it('should reject if peripheral is not connected', async () => {
         await expect(bleManager.getServices('non-connected-id')).rejects.toThrow('Peripheral not connected');
+        await new Promise(resolve => setImmediate(resolve));
       });
     });
 
@@ -256,14 +269,17 @@ describe('ble-Manager', () => {
           expect.objectContaining({ uuid: charUuid2 }),
           expect.objectContaining({ uuid: charUuid3 }),
         ]));
+        await new Promise(resolve => setImmediate(resolve));
       });
 
       it('should reject if service UUID is not found', async () => {
         await expect(bleManager.getCharacteristics(peripheralId, 'wrong-service-id')).rejects.toThrow('Service not found');
+        await new Promise(resolve => setImmediate(resolve));
       });
       
       it('should reject if peripheral is not connected', async () => {
         await expect(bleManager.getCharacteristics('non-connected-id', serviceUuid1)).rejects.toThrow('Peripheral not connected');
+        await new Promise(resolve => setImmediate(resolve));
       });
     });
 
@@ -273,20 +289,24 @@ describe('ble-Manager', () => {
         const mockChar = mockPeripheral.services[0].characteristics.find(c=>c.uuid === charUuid1);
         expect(mockChar.read).toHaveBeenCalledTimes(1);
         expect(data).toBe(Buffer.from('hello').toString('hex'));
+        await new Promise(resolve => setImmediate(resolve));
       });
 
       it('should reject if characteristic is not found', async () => {
         await expect(bleManager.readCharacteristic(peripheralId, 'wrong-char-id')).rejects.toThrow('Characteristic not found');
+        await new Promise(resolve => setImmediate(resolve));
       });
 
       it('should reject if characteristic is not readable', async () => {
         await expect(bleManager.readCharacteristic(peripheralId, charUuid3)).rejects.toThrow('Characteristic not readable');
+        await new Promise(resolve => setImmediate(resolve));
       });
       
       it('should reject if characteristic read call fails', async () => {
         const mockChar = mockPeripheral.services[0].characteristics.find(c=>c.uuid === charUuid1);
         mockChar.read.mockImplementationOnce((cb) => cb(new Error('Read Error')));
         await expect(bleManager.readCharacteristic(peripheralId, charUuid1)).rejects.toThrow('Read Error');
+        await new Promise(resolve => setImmediate(resolve));
       });
     });
 
@@ -298,26 +318,31 @@ describe('ble-Manager', () => {
         await bleManager.writeCharacteristic(peripheralId, charUuid1, hexValue, false);
         const mockChar = mockPeripheral.services[0].characteristics.find(c=>c.uuid === charUuid1);
         expect(mockChar.write).toHaveBeenCalledWith(bufferValue, false, expect.any(Function));
+        await new Promise(resolve => setImmediate(resolve));
       });
       
       it('should write data to a writable characteristic (without response)', async () => {
         await bleManager.writeCharacteristic(peripheralId, charUuid3, hexValue, true);
         const mockChar = mockPeripheral.services[0].characteristics.find(c=>c.uuid === charUuid3);
         expect(mockChar.write).toHaveBeenCalledWith(bufferValue, true, expect.any(Function));
+        await new Promise(resolve => setImmediate(resolve));
       });
 
       it('should reject if characteristic is not found', async () => {
         await expect(bleManager.writeCharacteristic(peripheralId, 'wrong-char-id', hexValue)).rejects.toThrow('Characteristic not found');
+        await new Promise(resolve => setImmediate(resolve));
       });
 
       it('should reject if characteristic is not writable', async () => {
         await expect(bleManager.writeCharacteristic(peripheralId, charUuid2, hexValue)).rejects.toThrow('Characteristic not writable');
+        await new Promise(resolve => setImmediate(resolve));
       });
       
       it('should reject if characteristic write call fails', async () => {
         const mockChar = mockPeripheral.services[0].characteristics.find(c=>c.uuid === charUuid1);
         mockChar.write.mockImplementationOnce((data, withoutResp, cb) => cb(new Error('Write Error')));
         await expect(bleManager.writeCharacteristic(peripheralId, charUuid1, hexValue)).rejects.toThrow('Write Error');
+        await new Promise(resolve => setImmediate(resolve));
       });
     });
   });
