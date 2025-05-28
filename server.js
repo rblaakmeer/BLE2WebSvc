@@ -207,7 +207,7 @@ module.exports = app;
 
 // Start the server only if this script is executed directly
 if (require.main === module) {
-  const port = process.env.PORT || 80; // Use environment variable for port if available
+  const port = process.env.PORT || 8111; // Use environment variable for port if available, default to 8111
   const server = app.listen(port, () => { // 'server' var is now local to this block
     console.log(`BLE2WebSvc server listening on port ${port}`);
   });
