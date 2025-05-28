@@ -202,8 +202,13 @@ app.post('/ble/devices/:deviceId/characteristics/:characteristicUuid', async (re
   }
 });
 
-// Start the server on port 80 and log its start to the console.
-var server = app.listen(80, function () {
-  var port = server.address().port;
-  console.log('Example app listening on port ', port);
-});
+// Export the app instance for testing or other module usage
+module.exports = app;
+
+// Start the server only if this script is executed directly
+if (require.main === module) {
+  const port = process.env.PORT || 80; // Use environment variable for port if available
+  const server = app.listen(port, () => { // 'server' var is now local to this block
+    console.log(`BLE2WebSvc server listening on port ${port}`);
+  });
+}
