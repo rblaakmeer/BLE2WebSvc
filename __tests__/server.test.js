@@ -29,6 +29,8 @@ describe('BLE API Endpoints', () => {
     });
 
     it('should return 500 if getDiscoveredPeripherals throws an error', async () => {
+      const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {}); // Spy and silence
+
       bleManager.getDiscoveredPeripherals.mockImplementation(() => {
         throw new Error('Internal Error');
       });
@@ -40,6 +42,11 @@ describe('BLE API Endpoints', () => {
         error: 'Failed to get discovered devices',
         details: 'Internal Error',
       });
+      expect(consoleErrorSpy).toHaveBeenCalled(); // Verify console.error was called
+      // Optionally, be more specific:
+      // expect(consoleErrorSpy).toHaveBeenCalledWith('API: Error getting discovered devices:', expect.any(Error));
+
+      consoleErrorSpy.mockRestore(); // Restore original console.error
     });
   });
 
