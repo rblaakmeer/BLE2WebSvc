@@ -65,6 +65,7 @@ describe('BLE API Endpoints', () => {
     });
 
     it('should return 404 if device to connect is not found', async () => {
+      const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
       bleManager.connectDevice.mockRejectedValue(new Error('Peripheral not found'));
 
       const response = await request(app).post(`/ble/devices/${deviceId}/connect`);
@@ -74,9 +75,12 @@ describe('BLE API Endpoints', () => {
         error: `Failed to connect to device ${deviceId}`,
         details: 'Peripheral not found',
       });
+      expect(consoleErrorSpy).toHaveBeenCalled();
+      consoleErrorSpy.mockRestore();
     });
 
     it('should return 400 if device is already connected', async () => {
+      const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
       bleManager.connectDevice.mockRejectedValue(new Error('Peripheral already connected'));
 
       const response = await request(app).post(`/ble/devices/${deviceId}/connect`);
@@ -86,9 +90,12 @@ describe('BLE API Endpoints', () => {
         error: `Failed to connect to device ${deviceId}`,
         details: 'Peripheral already connected',
       });
+      expect(consoleErrorSpy).toHaveBeenCalled();
+      consoleErrorSpy.mockRestore();
     });
     
     it('should return 500 for other connection errors', async () => {
+      const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
       bleManager.connectDevice.mockRejectedValue(new Error('Some other connection error'));
 
       const response = await request(app).post(`/ble/devices/${deviceId}/connect`);
@@ -98,6 +105,8 @@ describe('BLE API Endpoints', () => {
         error: `Failed to connect to device ${deviceId}`,
         details: 'Some other connection error',
       });
+      expect(consoleErrorSpy).toHaveBeenCalled();
+      consoleErrorSpy.mockRestore();
     });
   });
 
@@ -116,6 +125,7 @@ describe('BLE API Endpoints', () => {
     });
 
     it('should return 404 if device to disconnect is not found or not connected', async () => {
+      const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
       bleManager.disconnectDevice.mockRejectedValue(new Error('Peripheral not connected'));
 
       const response = await request(app).post(`/ble/devices/${deviceId}/disconnect`);
@@ -125,9 +135,12 @@ describe('BLE API Endpoints', () => {
         error: `Failed to disconnect from device ${deviceId}`,
         details: 'Peripheral not connected',
       });
+      expect(consoleErrorSpy).toHaveBeenCalled();
+      consoleErrorSpy.mockRestore();
     });
     
     it('should return 500 for other disconnection errors', async () => {
+      const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
       bleManager.disconnectDevice.mockRejectedValue(new Error('Some other disconnection error'));
       
       const response = await request(app).post(`/ble/devices/${deviceId}/disconnect`);
@@ -137,6 +150,8 @@ describe('BLE API Endpoints', () => {
         error: `Failed to disconnect from device ${deviceId}`,
         details: 'Some other disconnection error',
       });
+      expect(consoleErrorSpy).toHaveBeenCalled();
+      consoleErrorSpy.mockRestore();
     });
   });
 
@@ -155,6 +170,7 @@ describe('BLE API Endpoints', () => {
     });
 
     it('should return 404 if device is not connected when getting services', async () => {
+      const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
       bleManager.getServices.mockRejectedValue(new Error('Peripheral not connected'));
 
       const response = await request(app).get(`/ble/devices/${deviceId}/services`);
@@ -164,9 +180,12 @@ describe('BLE API Endpoints', () => {
         error: `Failed to get services for device ${deviceId}`,
         details: 'Peripheral not connected',
       });
+      expect(consoleErrorSpy).toHaveBeenCalled();
+      consoleErrorSpy.mockRestore();
     });
     
     it('should return 500 for other errors when getting services', async () => {
+      const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
       bleManager.getServices.mockRejectedValue(new Error('Some other error'));
 
       const response = await request(app).get(`/ble/devices/${deviceId}/services`);
@@ -176,6 +195,8 @@ describe('BLE API Endpoints', () => {
         error: `Failed to get services for device ${deviceId}`,
         details: 'Some other error',
       });
+      expect(consoleErrorSpy).toHaveBeenCalled();
+      consoleErrorSpy.mockRestore();
     });
   });
 
@@ -195,6 +216,7 @@ describe('BLE API Endpoints', () => {
     });
 
     it('should return 404 if service is not found when getting characteristics', async () => {
+      const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
       bleManager.getCharacteristics.mockRejectedValue(new Error('Service not found'));
 
       const response = await request(app).get(`/ble/devices/${deviceId}/services/${serviceUuid}/characteristics`);
@@ -204,26 +226,32 @@ describe('BLE API Endpoints', () => {
         error: `Failed to get characteristics for device ${deviceId}, service ${serviceUuid}`,
         details: 'Service not found',
       });
+      expect(consoleErrorSpy).toHaveBeenCalled();
+      consoleErrorSpy.mockRestore();
     });
     
     it('should return 404 if device is not connected when getting characteristics', async () => {
+      const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
       bleManager.getCharacteristics.mockRejectedValue(new Error('Peripheral not connected'));
 
       const response = await request(app).get(`/ble/devices/${deviceId}/services/${serviceUuid}/characteristics`);
 
       expect(response.status).toBe(404);
-      // The error message in server.js for this specific case might need checking if it's generic
-      // For now, assume it includes "Peripheral not connected" or similar that leads to 404
        expect(response.body.details).toContain('Peripheral not connected');
+      expect(consoleErrorSpy).toHaveBeenCalled();
+      consoleErrorSpy.mockRestore();
     });
     
     it('should return 500 for other errors when getting characteristics', async () => {
+      const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
       bleManager.getCharacteristics.mockRejectedValue(new Error('Some other error'));
       
       const response = await request(app).get(`/ble/devices/${deviceId}/services/${serviceUuid}/characteristics`);
       
       expect(response.status).toBe(500);
       expect(response.body.details).toContain('Some other error');
+      expect(consoleErrorSpy).toHaveBeenCalled();
+      consoleErrorSpy.mockRestore();
     });
   });
 
