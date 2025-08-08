@@ -165,18 +165,15 @@
             background: #f8f9fa;
             border: 1px solid #e9ecef;
             border-radius: 4px;
-            padding: 10px;
+            padding: 15px;
             margin-bottom: 8px;
             display: flex;
-            justify-content: space-between;
-            align-items: flex-start;
-            gap: 15px;
-            min-height: 70px;
+            flex-direction: column;
+            gap: 12px;
         }
 
         .characteristic-info {
-            flex: 1;
-            min-width: 0; /* Allow shrinking */
+            width: 100%;
             overflow-wrap: break-word;
         }
 
@@ -291,19 +288,13 @@
 
         .button-group {
             display: flex;
-            flex-direction: column;
-            gap: 5px;
-            align-items: flex-end;
-            flex-shrink: 0;
-            min-width: 120px;
-        }
-
-        @media (min-width: 600px) {
-            .button-group {
-                flex-direction: row;
-                align-items: center;
-                min-width: auto;
-            }
+            flex-direction: row;
+            gap: 8px;
+            align-items: center;
+            flex-wrap: wrap;
+            justify-content: flex-start;
+            padding-top: 8px;
+            border-top: 1px solid #e0e0e0;
         }
 
         .characteristic-value {
