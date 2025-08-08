@@ -209,6 +209,58 @@
             transform: translateY(-1px);
         }
 
+        .subscribe-btn {
+            background: linear-gradient(135deg, #8e44ad 0%, #9b59b6 100%);
+            color: white;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.8rem;
+            transition: transform 0.2s;
+        }
+
+        .subscribe-btn:hover {
+            transform: translateY(-1px);
+        }
+
+        .subscribe-btn.subscribed {
+            background: linear-gradient(135deg, #27ae60 0%, #2ecc71 100%);
+        }
+
+        .notifications-section {
+            margin-top: 8px;
+            padding: 10px;
+            background: #f8f4ff;
+            border-radius: 4px;
+            border: 1px solid #8e44ad;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .notification-item {
+            background: white;
+            border: 1px solid #e0e0e0;
+            border-radius: 4px;
+            padding: 8px;
+            margin-bottom: 5px;
+            font-size: 0.8rem;
+        }
+
+        .notification-value {
+            font-family: 'Courier New', monospace;
+            background: #f0f0f0;
+            padding: 4px;
+            border-radius: 2px;
+            margin: 4px 0;
+            word-break: break-all;
+        }
+
+        .notification-time {
+            color: #666;
+            font-size: 0.7rem;
+        }
+
         .write-input {
             width: 100%;
             padding: 8px;
@@ -410,6 +462,9 @@
                     servicesSection.style.display = 'none';
                     servicesSection.innerHTML = '';
                     
+                    // Clean up any active subscriptions for this device
+                    cleanupSubscriptionsForDevice(deviceId);
+                    
                 } else {
                     // Connect
                     const response = await fetch(`/ble/devices/${deviceId}/connect`, {
@@ -518,6 +573,7 @@
                 const characteristicsHtml = characteristics.map(char => {
                     const canRead = char.properties && char.properties.includes('read');
                     const canWrite = char.properties && (char.properties.includes('write') || char.properties.includes('writeWithoutResponse'));
+                    const canNotify = char.properties && (char.properties.includes('notify') || char.properties.includes('indicate'));
                     
                     return `
                         <div class="characteristic-item">
@@ -537,8 +593,12 @@
                                     `<button class="write-btn" onclick="toggleWriteSection('${deviceId}', '${char.uuid}')">Write</button>` : 
                                     ''
                                 }
-                                ${!canRead && !canWrite ? 
-                                    '<span style="color: #ccc; font-size: 0.8rem;">No read/write access</span>' : 
+                                ${canNotify ? 
+                                    `<button class="subscribe-btn" id="subscribe-btn-${deviceId}-${char.uuid}" onclick="toggleSubscription('${deviceId}', '${char.uuid}')">Subscribe</button>` : 
+                                    ''
+                                }
+                                ${!canRead && !canWrite && !canNotify ? 
+                                    '<span style="color: #ccc; font-size: 0.8rem;">No access available</span>' : 
                                     ''
                                 }
                             </div>
@@ -557,6 +617,10 @@
                             <div style="font-size: 0.8rem; color: #666; margin-top: 5px;">
                                 💡 Tip: Enter data as hex string (e.g., "48656c6c6f" for "Hello")
                             </div>
+                        </div>
+                        <div id="notifications-${deviceId}-${char.uuid}" class="notifications-section" style="display: none;">
+                            <h4>Live Notifications</h4>
+                            <div id="notifications-list-${deviceId}-${char.uuid}"></div>
                         </div>
                     `;
                 }).join('');
@@ -686,6 +750,187 @@
                 button.disabled = false;
                 button.textContent = 'Send';
             }
+        }
+
+        // Store active subscriptions and polling intervals
+        const activeSubscriptions = new Map();
+        const pollingIntervals = new Map();
+
+        // Toggle subscription to a characteristic
+        async function toggleSubscription(deviceId, characteristicUuid) {
+            const button = document.getElementById(`subscribe-btn-${deviceId}-${characteristicUuid}`);
+            const notificationsSection = document.getElementById(`notifications-${deviceId}-${characteristicUuid}`);
+            const subscriptionKey = `${deviceId}-${characteristicUuid}`;
+            
+            const isSubscribed = activeSubscriptions.has(subscriptionKey);
+            
+            button.disabled = true;
+            button.textContent = isSubscribed ? 'Unsubscribing...' : 'Subscribing...';
+            
+            try {
+                if (isSubscribed) {
+                    // Unsubscribe
+                    const response = await fetch(`/ble/devices/${deviceId}/characteristics/${characteristicUuid}/unsubscribe`, {
+                        method: 'POST'
+                    });
+                    
+                    if (!response.ok) {
+                        const errorData = await response.json();
+                        throw new Error(errorData.details || `HTTP error! status: ${response.status}`);
+                    }
+                    
+                    // Stop polling and clean up
+                    const intervalId = pollingIntervals.get(subscriptionKey);
+                    if (intervalId) {
+                        clearInterval(intervalId);
+                        pollingIntervals.delete(subscriptionKey);
+                    }
+                    
+                    activeSubscriptions.delete(subscriptionKey);
+                    button.textContent = 'Subscribe';
+                    button.classList.remove('subscribed');
+                    notificationsSection.style.display = 'none';
+                    
+                } else {
+                    // Subscribe
+                    const response = await fetch(`/ble/devices/${deviceId}/characteristics/${characteristicUuid}/subscribe`, {
+                        method: 'POST'
+                    });
+                    
+                    if (!response.ok) {
+                        const errorData = await response.json();
+                        throw new Error(errorData.details || `HTTP error! status: ${response.status}`);
+                    }
+                    
+                    const result = await response.json();
+                    
+                    activeSubscriptions.set(subscriptionKey, {
+                        deviceId,
+                        characteristicUuid,
+                        subscribedAt: new Date().toISOString(),
+                        lastNotificationTime: 0
+                    });
+                    
+                    button.textContent = 'Unsubscribe';
+                    button.classList.add('subscribed');
+                    notificationsSection.style.display = 'block';
+                    
+                    // Start polling for notifications
+                    startNotificationPolling(deviceId, characteristicUuid);
+                }
+                
+            } catch (error) {
+                console.error('Subscription error:', error);
+                
+                // Show error message
+                const valueContainer = document.getElementById(`value-${deviceId}-${characteristicUuid}`);
+                valueContainer.innerHTML = `<div class="error">Subscription failed: ${error.message}</div>`;
+                valueContainer.style.display = 'block';
+                
+                // Remove error message after 5 seconds
+                setTimeout(() => {
+                    if (valueContainer.innerHTML.includes('Subscription failed')) {
+                        valueContainer.style.display = 'none';
+                    }
+                }, 5000);
+                
+            } finally {
+                button.disabled = false;
+            }
+        }
+
+        // Start polling for notifications from a subscribed characteristic
+        function startNotificationPolling(deviceId, characteristicUuid) {
+            const subscriptionKey = `${deviceId}-${characteristicUuid}`;
+            const subscription = activeSubscriptions.get(subscriptionKey);
+            
+            if (!subscription) return;
+            
+            // Poll every 1 second for new notifications
+            const intervalId = setInterval(async () => {
+                try {
+                    const response = await fetch(`/ble/devices/${deviceId}/characteristics/${characteristicUuid}/notifications?since=${subscription.lastNotificationTime}&limit=50`);
+                    
+                    if (!response.ok) {
+                        if (response.status === 404) {
+                            // Subscription no longer exists, stop polling
+                            clearInterval(intervalId);
+                            pollingIntervals.delete(subscriptionKey);
+                            activeSubscriptions.delete(subscriptionKey);
+                            
+                            const button = document.getElementById(`subscribe-btn-${deviceId}-${characteristicUuid}`);
+                            if (button) {
+                                button.textContent = 'Subscribe';
+                                button.classList.remove('subscribed');
+                            }
+                            return;
+                        }
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    
+                    const data = await response.json();
+                    
+                    if (data.notifications && data.notifications.length > 0) {
+                        displayNotifications(deviceId, characteristicUuid, data.notifications);
+                        
+                        // Update last notification time
+                        const lastNotification = data.notifications[data.notifications.length - 1];
+                        subscription.lastNotificationTime = new Date(lastNotification.receivedAt).getTime();
+                    }
+                    
+                } catch (error) {
+                    console.error('Error polling notifications:', error);
+                }
+            }, 1000);
+            
+            pollingIntervals.set(subscriptionKey, intervalId);
+        }
+
+        // Display notifications in the UI
+        function displayNotifications(deviceId, characteristicUuid, notifications) {
+            const notificationsList = document.getElementById(`notifications-list-${deviceId}-${characteristicUuid}`);
+            
+            notifications.forEach(notification => {
+                const notificationDiv = document.createElement('div');
+                notificationDiv.className = 'notification-item';
+                
+                const timestamp = new Date(notification.receivedAt).toLocaleTimeString();
+                const notificationType = notification.isNotification ? 'Notification' : 'Indication';
+                
+                notificationDiv.innerHTML = `
+                    <div><strong>${notificationType}</strong></div>
+                    <div class="notification-value">${notification.value || 'No data'}</div>
+                    <div class="notification-time">${timestamp}</div>
+                `;
+                
+                // Add to top of list
+                notificationsList.insertBefore(notificationDiv, notificationsList.firstChild);
+                
+                // Keep only the last 20 notifications visible
+                while (notificationsList.children.length > 20) {
+                    notificationsList.removeChild(notificationsList.lastChild);
+                }
+            });
+        }
+
+        // Clean up subscriptions when device disconnects
+        function cleanupSubscriptionsForDevice(deviceId) {
+            const keysToRemove = [];
+            
+            activeSubscriptions.forEach((subscription, key) => {
+                if (subscription.deviceId === deviceId) {
+                    keysToRemove.push(key);
+                }
+            });
+            
+            keysToRemove.forEach(key => {
+                const intervalId = pollingIntervals.get(key);
+                if (intervalId) {
+                    clearInterval(intervalId);
+                    pollingIntervals.delete(key);
+                }
+                activeSubscriptions.delete(key);
+            });
         }
     </script>
 </body>

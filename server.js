@@ -205,6 +205,183 @@ app.post('/ble/devices/:deviceId/characteristics/:characteristicUuid', async (re
   }
 });
 
+// Store active subscriptions for each device/characteristic combination
+const activeSubscriptions = new Map();
+
+/**
+ * @route POST /ble/devices/:deviceId/characteristics/:characteristicUuid/subscribe
+ * @description Subscribes to notifications/indications from a specific characteristic.
+ * @param {string} req.params.deviceId - The ID of the connected device.
+ * @param {string} req.params.characteristicUuid - The UUID of the characteristic to subscribe to.
+ * @returns {Object} 200 - Success message with subscription details.
+ * @returns {Object} 404 - If device not connected, characteristic not found, or not notifiable.
+ * @returns {Object} 500 - Error object if subscription fails.
+ */
+app.post('/ble/devices/:deviceId/characteristics/:characteristicUuid/subscribe', async (req, res) => {
+  const { deviceId, characteristicUuid } = req.params;
+  const subscriptionKey = `${deviceId}-${characteristicUuid}`;
+  
+  try {
+    console.log(`API: Request to subscribe to characteristic ${characteristicUuid} on device ${deviceId}`);
+    
+    // Check if already subscribed
+    if (activeSubscriptions.has(subscriptionKey)) {
+      return res.status(400).json({ error: 'Already subscribed to this characteristic' });
+    }
+    
+    // Create a data buffer to store received notifications
+    const dataBuffer = [];
+    
+    // Subscribe with a callback to handle incoming data
+    const result = await bleManager.subscribeToCharacteristic(deviceId, characteristicUuid, (data) => {
+      // Store the notification data with timestamp
+      dataBuffer.push({
+        ...data,
+        receivedAt: new Date().toISOString()
+      });
+      
+      // Keep only the last 100 notifications to prevent memory issues
+      if (dataBuffer.length > 100) {
+        dataBuffer.shift();
+      }
+    });
+    
+    // Store the subscription info
+    activeSubscriptions.set(subscriptionKey, {
+      deviceId,
+      characteristicUuid,
+      dataBuffer,
+      subscribedAt: new Date().toISOString()
+    });
+    
+    res.json({ 
+      message: 'Subscription successful', 
+      subscriptionKey,
+      ...result 
+    });
+    
+  } catch (error) {
+    console.error(`API: Error subscribing to characteristic ${characteristicUuid} for ${deviceId}:`, error);
+    let statusCode = 500;
+    if (error.message.includes('not connected') || error.message.includes('Characteristic not found') || error.message.includes('not support')) statusCode = 404;
+    res.status(statusCode).json({ error: `Failed to subscribe to characteristic ${characteristicUuid} for device ${deviceId}`, details: error.message });
+  }
+});
+
+/**
+ * @route POST /ble/devices/:deviceId/characteristics/:characteristicUuid/unsubscribe
+ * @description Unsubscribes from notifications/indications from a specific characteristic.
+ * @param {string} req.params.deviceId - The ID of the connected device.
+ * @param {string} req.params.characteristicUuid - The UUID of the characteristic to unsubscribe from.
+ * @returns {Object} 200 - Success message.
+ * @returns {Object} 404 - If device not connected, characteristic not found, or not subscribed.
+ * @returns {Object} 500 - Error object if unsubscription fails.
+ */
+app.post('/ble/devices/:deviceId/characteristics/:characteristicUuid/unsubscribe', async (req, res) => {
+  const { deviceId, characteristicUuid } = req.params;
+  const subscriptionKey = `${deviceId}-${characteristicUuid}`;
+  
+  try {
+    console.log(`API: Request to unsubscribe from characteristic ${characteristicUuid} on device ${deviceId}`);
+    
+    // Check if subscribed
+    if (!activeSubscriptions.has(subscriptionKey)) {
+      return res.status(404).json({ error: 'Not subscribed to this characteristic' });
+    }
+    
+    const result = await bleManager.unsubscribeFromCharacteristic(deviceId, characteristicUuid);
+    
+    // Remove from active subscriptions
+    activeSubscriptions.delete(subscriptionKey);
+    
+    res.json(result);
+    
+  } catch (error) {
+    console.error(`API: Error unsubscribing from characteristic ${characteristicUuid} for ${deviceId}:`, error);
+    let statusCode = 500;
+    if (error.message.includes('not connected') || error.message.includes('Characteristic not found')) statusCode = 404;
+    res.status(statusCode).json({ error: `Failed to unsubscribe from characteristic ${characteristicUuid} for device ${deviceId}`, details: error.message });
+  }
+});
+
+/**
+ * @route GET /ble/devices/:deviceId/characteristics/:characteristicUuid/notifications
+ * @description Gets the latest notifications/indications received from a subscribed characteristic.
+ * @param {string} req.params.deviceId - The ID of the connected device.
+ * @param {string} req.params.characteristicUuid - The UUID of the characteristic.
+ * @param {number} [req.query.since] - Optional timestamp to get notifications since a specific time.
+ * @param {number} [req.query.limit=10] - Optional limit for number of notifications to return.
+ * @returns {Object} 200 - Array of notification data.
+ * @returns {Object} 404 - If not subscribed to this characteristic.
+ */
+app.get('/ble/devices/:deviceId/characteristics/:characteristicUuid/notifications', (req, res) => {
+  const { deviceId, characteristicUuid } = req.params;
+  const { since, limit = 10 } = req.query;
+  const subscriptionKey = `${deviceId}-${characteristicUuid}`;
+  
+  try {
+    console.log(`API: Request to get notifications for characteristic ${characteristicUuid} on device ${deviceId}`);
+    
+    const subscription = activeSubscriptions.get(subscriptionKey);
+    if (!subscription) {
+      return res.status(404).json({ error: 'Not subscribed to this characteristic' });
+    }
+    
+    let notifications = subscription.dataBuffer;
+    
+    // Filter by timestamp if 'since' parameter is provided
+    if (since) {
+      const sinceDate = new Date(parseInt(since));
+      notifications = notifications.filter(notification => 
+        new Date(notification.receivedAt) > sinceDate
+      );
+    }
+    
+    // Apply limit
+    const limitNum = parseInt(limit);
+    if (limitNum > 0) {
+      notifications = notifications.slice(-limitNum);
+    }
+    
+    res.json({
+      subscriptionKey,
+      deviceId,
+      characteristicUuid,
+      notifications,
+      totalCount: subscription.dataBuffer.length,
+      subscribedAt: subscription.subscribedAt
+    });
+    
+  } catch (error) {
+    console.error(`API: Error getting notifications for characteristic ${characteristicUuid} for ${deviceId}:`, error);
+    res.status(500).json({ error: `Failed to get notifications for characteristic ${characteristicUuid} for device ${deviceId}`, details: error.message });
+  }
+});
+
+/**
+ * @route GET /ble/subscriptions
+ * @description Gets a list of all active subscriptions.
+ * @returns {Object} 200 - Array of active subscription information.
+ */
+app.get('/ble/subscriptions', (req, res) => {
+  try {
+    const subscriptions = Array.from(activeSubscriptions.entries()).map(([key, subscription]) => ({
+      subscriptionKey: key,
+      deviceId: subscription.deviceId,
+      characteristicUuid: subscription.characteristicUuid,
+      subscribedAt: subscription.subscribedAt,
+      notificationCount: subscription.dataBuffer.length,
+      lastNotification: subscription.dataBuffer.length > 0 ? 
+        subscription.dataBuffer[subscription.dataBuffer.length - 1] : null
+    }));
+    
+    res.json({ subscriptions });
+  } catch (error) {
+    console.error('API: Error getting subscriptions:', error);
+    res.status(500).json({ error: 'Failed to get subscriptions', details: error.message });
+  }
+});
+
 // Export the app instance for testing or other module usage
 module.exports = app;
 

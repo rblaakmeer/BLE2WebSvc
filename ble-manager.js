@@ -356,6 +356,118 @@ async function writeCharacteristic(peripheralId, characteristicUuid, valueHex, w
   });
 }
 
+/**
+ * @function subscribeToCharacteristic
+ * @description Subscribes to notifications/indications from a specific characteristic.
+ * @param {string} peripheralId - The ID of the connected peripheral.
+ * @param {string} characteristicUuid - The UUID of the characteristic to subscribe to.
+ * @param {function} callback - Callback function to handle received data.
+ * @returns {Promise<Object>} A Promise that resolves with a success message.
+ * @rejects {Error} If peripheral not connected, characteristic not found, or not notifiable.
+ */
+async function subscribeToCharacteristic(peripheralId, characteristicUuid, callback) {
+  const peripheral = connectedPeripherals[peripheralId];
+  if (!peripheral) {
+    return Promise.reject(new Error('Peripheral not connected'));
+  }
+
+  // Find the target characteristic.
+  let targetCharacteristic = null;
+  if (peripheral.services) {
+    for (const service of peripheral.services) {
+      if (service.characteristics) {
+        targetCharacteristic = service.characteristics.find(c => c.uuid === characteristicUuid);
+        if (targetCharacteristic) break;
+      }
+    }
+  }
+
+  if (!targetCharacteristic) {
+    return Promise.reject(new Error('Characteristic not found'));
+  }
+
+  // Check if characteristic supports notifications or indications
+  const canNotify = targetCharacteristic.properties && targetCharacteristic.properties.includes('notify');
+  const canIndicate = targetCharacteristic.properties && targetCharacteristic.properties.includes('indicate');
+
+  if (!canNotify && !canIndicate) {
+    return Promise.reject(new Error('Characteristic does not support notifications or indications'));
+  }
+
+  return new Promise((resolve, reject) => {
+    // Set up the data event listener
+    targetCharacteristic.on('data', (data, isNotification) => {
+      const hexValue = data ? data.toString('hex') : null;
+      callback({
+        characteristicUuid,
+        value: hexValue,
+        isNotification,
+        timestamp: new Date().toISOString()
+      });
+    });
+
+    // Subscribe to notifications/indications
+    targetCharacteristic.subscribe((error) => {
+      if (error) {
+        return reject(error);
+      }
+      resolve({ 
+        message: 'Subscription successful', 
+        characteristicUuid,
+        supportsNotify: canNotify,
+        supportsIndicate: canIndicate
+      });
+    });
+  });
+}
+
+/**
+ * @function unsubscribeFromCharacteristic
+ * @description Unsubscribes from notifications/indications from a specific characteristic.
+ * @param {string} peripheralId - The ID of the connected peripheral.
+ * @param {string} characteristicUuid - The UUID of the characteristic to unsubscribe from.
+ * @returns {Promise<Object>} A Promise that resolves with a success message.
+ * @rejects {Error} If peripheral not connected, characteristic not found, or unsubscribe fails.
+ */
+async function unsubscribeFromCharacteristic(peripheralId, characteristicUuid) {
+  const peripheral = connectedPeripherals[peripheralId];
+  if (!peripheral) {
+    return Promise.reject(new Error('Peripheral not connected'));
+  }
+
+  // Find the target characteristic.
+  let targetCharacteristic = null;
+  if (peripheral.services) {
+    for (const service of peripheral.services) {
+      if (service.characteristics) {
+        targetCharacteristic = service.characteristics.find(c => c.uuid === characteristicUuid);
+        if (targetCharacteristic) break;
+      }
+    }
+  }
+
+  if (!targetCharacteristic) {
+    return Promise.reject(new Error('Characteristic not found'));
+  }
+
+  return new Promise((resolve, reject) => {
+    // Unsubscribe from notifications/indications
+    targetCharacteristic.unsubscribe((error) => {
+      if (error) {
+        return reject(error);
+      }
+      
+      // Remove all data event listeners
+      targetCharacteristic.removeAllListeners('data');
+      
+      resolve({ 
+        message: 'Unsubscription successful', 
+        characteristicUuid
+      });
+    });
+  });
+}
+
 // Exported module functions and objects.
 module.exports = {
   noble, // The noble instance itself, for direct use if needed.
@@ -367,5 +479,7 @@ module.exports = {
   getServices, // Function to get services of a connected device.
   getCharacteristics, // Function to get characteristics of a service.
   readCharacteristic, // Function to read a characteristic's value.
-  writeCharacteristic // Function to write to a characteristic.
+  writeCharacteristic, // Function to write to a characteristic.
+  subscribeToCharacteristic, // Function to subscribe to characteristic notifications.
+  unsubscribeFromCharacteristic // Function to unsubscribe from characteristic notifications.
 };
