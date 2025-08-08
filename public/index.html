@@ -187,10 +187,50 @@
             cursor: pointer;
             font-size: 0.8rem;
             transition: transform 0.2s;
+            margin-right: 5px;
         }
 
         .read-btn:hover {
             transform: translateY(-1px);
+        }
+
+        .write-btn {
+            background: linear-gradient(135deg, #ff6b35 0%, #f7931e 100%);
+            color: white;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.8rem;
+            transition: transform 0.2s;
+        }
+
+        .write-btn:hover {
+            transform: translateY(-1px);
+        }
+
+        .write-input {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9rem;
+            margin-top: 8px;
+        }
+
+        .write-section {
+            margin-top: 8px;
+            padding: 10px;
+            background: #fff3e0;
+            border-radius: 4px;
+            border: 1px solid #ffcc02;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 5px;
+            align-items: center;
         }
 
         .characteristic-value {
@@ -475,24 +515,51 @@
                     return;
                 }
 
-                const characteristicsHtml = characteristics.map(char => `
-                    <div class="characteristic-item">
-                        <div>
-                            <strong>${char.name || 'Unknown Characteristic'}</strong><br>
-                            <div class="characteristic-uuid">UUID: ${char.uuid}</div>
-                            <div style="font-size: 0.8rem; color: #888;">
-                                Properties: ${char.properties ? char.properties.join(', ') : 'N/A'}
+                const characteristicsHtml = characteristics.map(char => {
+                    const canRead = char.properties && char.properties.includes('read');
+                    const canWrite = char.properties && (char.properties.includes('write') || char.properties.includes('writeWithoutResponse'));
+                    
+                    return `
+                        <div class="characteristic-item">
+                            <div>
+                                <strong>${char.name || 'Unknown Characteristic'}</strong><br>
+                                <div class="characteristic-uuid">UUID: ${char.uuid}</div>
+                                <div style="font-size: 0.8rem; color: #888;">
+                                    Properties: ${char.properties ? char.properties.join(', ') : 'N/A'}
+                                </div>
+                            </div>
+                            <div class="button-group">
+                                ${canRead ? 
+                                    `<button class="read-btn" onclick="readCharacteristic('${deviceId}', '${char.uuid}')">Read</button>` : 
+                                    ''
+                                }
+                                ${canWrite ? 
+                                    `<button class="write-btn" onclick="toggleWriteSection('${deviceId}', '${char.uuid}')">Write</button>` : 
+                                    ''
+                                }
+                                ${!canRead && !canWrite ? 
+                                    '<span style="color: #ccc; font-size: 0.8rem;">No read/write access</span>' : 
+                                    ''
+                                }
                             </div>
                         </div>
-                        <div>
-                            ${char.properties && char.properties.includes('read') ? 
-                                `<button class="read-btn" onclick="readCharacteristic('${deviceId}', '${char.uuid}')">Read</button>` : 
-                                '<span style="color: #ccc; font-size: 0.8rem;">Not readable</span>'
-                            }
+                        <div id="value-${deviceId}-${char.uuid}" class="characteristic-value" style="display: none;"></div>
+                        <div id="write-${deviceId}-${char.uuid}" class="write-section" style="display: none;">
+                            <label for="write-input-${deviceId}-${char.uuid}">Enter hex value to write:</label>
+                            <input type="text" id="write-input-${deviceId}-${char.uuid}" class="write-input" 
+                                   placeholder="e.g., 48656c6c6f (hex string)" 
+                                   pattern="[0-9a-fA-F]*"
+                                   title="Enter a valid hex string (0-9, a-f, A-F)">
+                            <div style="margin-top: 8px;">
+                                <button class="write-btn" onclick="writeCharacteristic('${deviceId}', '${char.uuid}')">Send</button>
+                                <button class="read-btn" onclick="toggleWriteSection('${deviceId}', '${char.uuid}')">Cancel</button>
+                            </div>
+                            <div style="font-size: 0.8rem; color: #666; margin-top: 5px;">
+                                💡 Tip: Enter data as hex string (e.g., "48656c6c6f" for "Hello")
+                            </div>
                         </div>
-                    </div>
-                    <div id="value-${deviceId}-${char.uuid}" class="characteristic-value" style="display: none;"></div>
-                `).join('');
+                    `;
+                }).join('');
 
                 characteristicsContainer.innerHTML = characteristicsHtml;
                 
@@ -533,6 +600,91 @@
             } finally {
                 button.disabled = false;
                 button.textContent = 'Read';
+            }
+        }
+
+        // Toggle write section visibility
+        function toggleWriteSection(deviceId, characteristicUuid) {
+            const writeSection = document.getElementById(`write-${deviceId}-${characteristicUuid}`);
+            const isVisible = writeSection.style.display === 'block';
+            
+            writeSection.style.display = isVisible ? 'none' : 'block';
+            
+            if (!isVisible) {
+                // Focus on input when showing
+                const input = document.getElementById(`write-input-${deviceId}-${characteristicUuid}`);
+                setTimeout(() => input.focus(), 100);
+            }
+        }
+
+        // Write a value to a characteristic
+        async function writeCharacteristic(deviceId, characteristicUuid) {
+            const input = document.getElementById(`write-input-${deviceId}-${characteristicUuid}`);
+            const writeSection = document.getElementById(`write-${deviceId}-${characteristicUuid}`);
+            const valueContainer = document.getElementById(`value-${deviceId}-${characteristicUuid}`);
+            
+            const hexValue = input.value.trim();
+            
+            // Validate hex input
+            if (!hexValue) {
+                alert('Please enter a hex value to write.');
+                return;
+            }
+            
+            if (!/^[0-9a-fA-F]*$/.test(hexValue)) {
+                alert('Invalid hex format. Please use only 0-9 and a-f characters.');
+                return;
+            }
+            
+            if (hexValue.length % 2 !== 0) {
+                alert('Hex string must have an even number of characters.');
+                return;
+            }
+            
+            const button = event.target;
+            button.disabled = true;
+            button.textContent = 'Writing...';
+            
+            try {
+                const response = await fetch(`/ble/devices/${deviceId}/characteristics/${characteristicUuid}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        value: hexValue,
+                        withoutResponse: false
+                    })
+                });
+                
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.details || `HTTP error! status: ${response.status}`);
+                }
+                
+                const result = await response.json();
+                
+                // Show success message
+                valueContainer.innerHTML = `
+                    <div class="success">
+                        <strong>Write successful!</strong><br>
+                        Value written: ${hexValue}<br>
+                        <small>Written at: ${new Date().toLocaleTimeString()}</small>
+                    </div>
+                `;
+                valueContainer.style.display = 'block';
+                
+                // Clear input and hide write section
+                input.value = '';
+                writeSection.style.display = 'none';
+                
+            } catch (error) {
+                console.error('Error writing characteristic:', error);
+                valueContainer.innerHTML = `<div class="error">Failed to write: ${error.message}</div>`;
+                valueContainer.style.display = 'block';
+            } finally {
+                button.disabled = false;
+                button.textContent = 'Send';
             }
         }
     </script>
