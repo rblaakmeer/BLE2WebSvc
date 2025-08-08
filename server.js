@@ -26,6 +26,9 @@ var app = express();
 // Middleware to parse incoming JSON requests.
 app.use(express.json());
 
+// Serve static files from public directory
+app.use('/web', express.static('public'));
+
 /**
  * @route GET /ble/devices
  * @description Retrieves a list of discovered BLE devices.
