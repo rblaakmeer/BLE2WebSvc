@@ -1,11 +1,12 @@
 {
-  "name": "BLE2WebSvc",
+  "name": "ble2websvc",
   "version": "1.0.0",
   "description": "An Expressjs Web server as a bridge between BLE and Webservices on resin.io",
   "main": "server.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node server.js"
+    "test": "jest",
+    "start": "node server.js",
+    "check-version": "node check-node-version.js"
   },
   "repository": {
     "type": "git",
@@ -25,8 +26,16 @@
     "url": "https://github.com/rblaakmeer/BLE2WebSvc/issues"
   },
   "homepage": "https://github.com/rblaakmeer/BLE2WebSvc#readme",
+  "engines": {
+    "node": ">=16.16.0 <17.0.0"
+  },
   "dependencies": {
-    "express": "*",
-    "noble": "*"
+    "express": "^4.19.2",
+    "@abandonware/noble": "^1.9.2-20"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "supertest": "^6.3.4",
+    "semver": "^7.5.4"
   }
 }
