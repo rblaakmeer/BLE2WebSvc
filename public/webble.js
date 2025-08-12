@@ -9,7 +9,7 @@ document.addEventListener('DOMContentLoaded', () => {
         devicesContainer.innerHTML = '<div class="loading">Scanning...</div>';
         try {
             const device = await navigator.bluetooth.requestDevice({
-                acceptAllDevices: true,
+                filters: [{ services: ['battery_service'] }, { services: ['heart_rate'] }],
                 optionalServices: ['battery_service', 'heart_rate'] // Add more services as needed
             });
             devicesContainer.innerHTML = ''; // Clear the container
