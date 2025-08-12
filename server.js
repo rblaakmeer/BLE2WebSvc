@@ -28,6 +28,9 @@ app.use(express.json());
 
 // Serve static files from public directory
 app.use('/web', express.static('public'));
+app.get('/webble', (req, res) => {
+  res.sendFile(__dirname + '/public/webble.html');
+});
 
 /**
  * @route GET /ble/devices
