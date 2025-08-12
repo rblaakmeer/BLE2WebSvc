@@ -60,19 +60,6 @@
             font-weight: 500;
         }
 
-        .browser-support {
-            background: #e3f2fd;
-            border: 1px solid #2196f3;
-            border-radius: 8px;
-            padding: 15px;
-            margin-bottom: 20px;
-        }
-
-        .browser-support.unsupported {
-            background: #ffebee;
-            border-color: #f44336;
-        }
-
         .scan-btn {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
@@ -85,16 +72,9 @@
             transition: transform 0.2s, box-shadow 0.2s;
         }
 
-        .scan-btn:hover:not(:disabled) {
+        .scan-btn:hover {
             transform: translateY(-2px);
             box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
-        }
-
-        .scan-btn:disabled {
-            background: #ccc;
-            cursor: not-allowed;
-            transform: none;
-            box-shadow: none;
         }
 
         .device-grid {
@@ -114,11 +94,6 @@
         .device-card:hover {
             transform: translateY(-2px);
             box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
-        }
-
-        .device-card.connected {
-            border-color: #4caf50;
-            background: #f1f8e9;
         }
 
         .device-name {
@@ -147,10 +122,9 @@
             cursor: pointer;
             font-size: 0.9rem;
             transition: transform 0.2s, box-shadow 0.2s;
-            margin-right: 10px;
         }
 
-        .connect-btn:hover:not(:disabled) {
+        .connect-btn:hover {
             transform: translateY(-1px);
             box-shadow: 0 3px 10px rgba(79, 172, 254, 0.4);
         }
@@ -161,348 +135,26 @@
             transform: none;
             box-shadow: none;
         }
-
-        .disconnect-btn {
-            background: linear-gradient(135deg, #ff6b6b 0%, #ee5a52 100%);
-            color: white;
-            border: none;
-            padding: 10px 20px;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 0.9rem;
-            transition: transform 0.2s, box-shadow 0.2s;
-        }
-
-        .disconnect-btn:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 3px 10px rgba(255, 107, 107, 0.4);
-        }
-
-        .services-section {
-            margin-top: 20px;
-            padding-top: 20px;
-            border-top: 1px solid #e0e0e0;
-        }
-
-        .service-card {
-            background: white;
-            border: 1px solid #e0e0e0;
-            border-radius: 6px;
-            padding: 15px;
-            margin-bottom: 15px;
-        }
-
-        .service-uuid {
-            font-family: 'Courier New', monospace;
-            font-size: 0.9rem;
-            color: #666;
-            margin-bottom: 10px;
-        }
-
-        .characteristics-list {
-            margin-top: 10px;
-        }
-
-        .characteristic-item {
-            background: #f8f9fa;
-            border: 1px solid #e9ecef;
-            border-radius: 4px;
-            padding: 15px;
-            margin-bottom: 8px;
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-        }
-
-        .characteristic-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-start;
-            flex-wrap: wrap;
-            gap: 10px;
-        }
-
-        .characteristic-uuid {
-            font-family: 'Courier New', monospace;
-            font-size: 0.8rem;
-            color: #666;
-            flex: 1;
-            min-width: 200px;
-        }
-
-        .characteristic-properties {
-            display: flex;
-            gap: 5px;
-            flex-wrap: wrap;
-        }
-
-        .property-tag {
-            background: #e3f2fd;
-            color: #1976d2;
-            padding: 2px 6px;
-            border-radius: 3px;
-            font-size: 0.7rem;
-            text-transform: uppercase;
-        }
-
-        .characteristic-actions {
-            display: flex;
-            gap: 8px;
-            flex-wrap: wrap;
-            align-items: center;
-        }
-
-        .read-btn {
-            background: linear-gradient(135deg, #4caf50 0%, #45a049 100%);
-            color: white;
-            border: none;
-            padding: 6px 12px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 0.8rem;
-            transition: transform 0.2s;
-        }
-
-        .read-btn:hover {
-            transform: translateY(-1px);
-        }
-
-        .write-btn {
-            background: linear-gradient(135deg, #ff9800 0%, #f57c00 100%);
-            color: white;
-            border: none;
-            padding: 6px 12px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 0.8rem;
-            transition: transform 0.2s;
-        }
-
-        .write-btn:hover {
-            transform: translateY(-1px);
-        }
-
-        .subscribe-btn {
-            background: linear-gradient(135deg, #8e44ad 0%, #9b59b6 100%);
-            color: white;
-            border: none;
-            padding: 6px 12px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 0.8rem;
-            transition: transform 0.2s;
-        }
-
-        .subscribe-btn:hover {
-            transform: translateY(-1px);
-        }
-
-        .subscribe-btn.subscribed {
-            background: linear-gradient(135deg, #e91e63 0%, #ad1457 100%);
-        }
-
-        .characteristic-value {
-            font-family: 'Courier New', monospace;
-            background: #f5f5f5;
-            padding: 8px;
-            border-radius: 4px;
-            font-size: 0.9rem;
-            word-break: break-all;
-            border: 1px solid #ddd;
-        }
-
-        .notifications-section {
-            margin-top: 10px;
-            max-height: 200px;
-            overflow-y: auto;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            background: #fafafa;
-        }
-
-        .notification-item {
-            padding: 8px;
-            border-bottom: 1px solid #eee;
-            font-family: 'Courier New', monospace;
-            font-size: 0.8rem;
-        }
-
-        .notification-item:last-child {
-            border-bottom: none;
-        }
-
-        .notification-value {
-            background: #e8f5e8;
-            padding: 4px;
-            border-radius: 2px;
-            margin: 4px 0;
-            word-break: break-all;
-        }
-
-        .notification-time {
-            color: #666;
-            font-size: 0.7rem;
-        }
-
-        .write-input {
-            width: 100%;
-            padding: 8px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            font-family: 'Courier New', monospace;
-            font-size: 0.9rem;
-            margin-top: 8px;
-        }
-
-        .write-section {
-            display: none;
-            margin-top: 10px;
-            padding: 10px;
-            background: #fff3e0;
-            border-radius: 4px;
-            border: 1px solid #ffcc02;
-        }
-
-        .write-section.visible {
-            display: block;
-        }
-
-        .write-controls {
-            display: flex;
-            gap: 8px;
-            margin-top: 8px;
-            align-items: center;
-        }
-
-        .send-btn {
-            background: #ff9800;
-            color: white;
-            border: none;
-            padding: 6px 12px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 0.8rem;
-        }
-
-        .cancel-btn {
-            background: #757575;
-            color: white;
-            border: none;
-            padding: 6px 12px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 0.8rem;
-        }
-
-        .loading {
-            color: #666;
-            font-style: italic;
-            padding: 20px;
-        }
-
-        .error {
-            color: #d32f2f;
-            background: #ffebee;
-            padding: 10px;
-            border-radius: 4px;
-            margin-bottom: 15px;
-        }
-
-        .success {
-            color: #2e7d32;
-            background: #e8f5e8;
-            padding: 10px;
-            border-radius: 4px;
-            margin-bottom: 15px;
-        }
-
-        .status-indicator {
-            display: inline-block;
-            width: 10px;
-            height: 10px;
-            border-radius: 50%;
-            margin-right: 8px;
-        }
-
-        .status-connected {
-            background: #4caf50;
-        }
-
-        .status-disconnected {
-            background: #757575;
-        }
-
-        .status-connecting {
-            background: #ff9800;
-            animation: pulse 1.5s infinite;
-        }
-
-        @keyframes pulse {
-            0% { opacity: 1; }
-            50% { opacity: 0.5; }
-            100% { opacity: 1; }
-        }
-
-        .info-box {
-            background: #f0f7ff;
-            border: 1px solid #2196f3;
-            border-radius: 8px;
-            padding: 15px;
-            margin-bottom: 20px;
-        }
-
-        .info-box h3 {
-            color: #1976d2;
-            margin-bottom: 10px;
-        }
-
-        .info-box ul {
-            margin-left: 20px;
-            color: #333;
-        }
-
-        .info-box li {
-            margin-bottom: 5px;
-        }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <h1>BLE2WebSvc</h1>
-            <p>Web Bluetooth API Interface</p>
+            <h1>Web-BLE Device Manager</h1>
+            <p>Directly connect to BLE devices using the Web Bluetooth API</p>
         </div>
-        
+
         <div class="content">
             <div class="section">
-                <div id="browser-support-info" class="browser-support">
-                    <h3>Browser Support</h3>
-                    <p id="support-message">Checking Web Bluetooth API support...</p>
+                <h2>Available Devices</h2>
+                <button class="scan-btn" id="scanButton">Scan for BLE Devices</button>
+                <div id="devices-container">
+                    <div class="loading">Click the button to scan for devices.</div>
                 </div>
-
-                <div class="info-box">
-                    <h3>About Web Bluetooth API</h3>
-                    <ul>
-                        <li>Direct browser-to-device communication (no server required)</li>
-                        <li>Requires HTTPS or localhost for security</li>
-                        <li>User must explicitly grant permission for each device</li>
-                        <li>Supported in Chrome, Edge, and some other browsers</li>
-                        <li>Limited to devices advertising specific services</li>
-                    </ul>
-                </div>
-
-                <h2>BLE Device Scanner</h2>
-                <button id="scan-btn" class="scan-btn" onclick="scanForDevices()">Scan for Devices</button>
-                
-                <div id="devices-container" class="device-grid">
-                    <!-- Devices will be populated here -->
-                </div>
-                
-                <div id="messages"></div>
             </div>
         </div>
     </div>
 
-    <script src="webble.js"></script>
+    <script src="/webble.js"></script>
 </body>
 </html>
