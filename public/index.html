@@ -369,6 +369,10 @@
             <div class="section">
                 <h2>Discovered Devices</h2>
                 <button class="refresh-btn" onclick="refreshDevices()">🔄 Refresh Devices</button>
+                <label style="margin-left: 12px; font-size: 0.95rem; color: #333;">
+                    <input type="checkbox" id="toggle-unknown" style="margin-right: 6px;">
+                    Show unknown devices
+                </label>
                 <div id="devices-container">
                     <div class="loading">Loading devices...</div>
                 </div>
@@ -379,9 +383,30 @@
     <script>
         let devices = [];
         let connectedDevices = new Set();
+        let showUnknownDevices = false;
 
         // Initialize the page
         document.addEventListener('DOMContentLoaded', function() {
+            // Load preference from localStorage
+            try {
+                const saved = localStorage.getItem('showUnknownDevices');
+                showUnknownDevices = saved ? JSON.parse(saved) : false;
+            } catch (e) {
+                showUnknownDevices = false;
+            }
+
+            // Initialize checkbox and handler
+            const toggle = document.getElementById('toggle-unknown');
+            if (toggle) {
+                toggle.checked = showUnknownDevices;
+                toggle.addEventListener('change', (e) => {
+                    showUnknownDevices = !!e.target.checked;
+                    try { localStorage.setItem('showUnknownDevices', JSON.stringify(showUnknownDevices)); } catch (e) {}
+                    // Re-render current list using new filter
+                    displayDevices();
+                });
+            }
+
             refreshDevices();
         });
 
@@ -408,19 +433,21 @@
         function displayDevices() {
             const container = document.getElementById('devices-container');
             
-            // Filter out devices without a name (Unknown Devices)
-            const namedDevices = devices.filter(device => device.name && device.name.trim() !== '');
+            // Apply filter based on toggle
+            const list = showUnknownDevices ? devices : devices.filter(device => device.name && device.name.trim() !== '');
             
-            if (namedDevices.length === 0) {
+            if (list.length === 0) {
                 if (devices.length === 0) {
                     container.innerHTML = '<div class="loading">No devices discovered yet. Make sure Bluetooth is enabled and devices are advertising.</div>';
+                } else if (!showUnknownDevices) {
+                    container.innerHTML = '<div class="loading">No named devices found. Toggle "Show unknown devices" to include unnamed devices.</div>';
                 } else {
-                    container.innerHTML = '<div class="loading">No named devices found. All discovered devices are unnamed and have been filtered out.</div>';
+                    container.innerHTML = '<div class="loading">No devices to display.</div>';
                 }
                 return;
             }
 
-            const devicesHtml = namedDevices.map(device => {
+            const devicesHtml = list.map(device => {
                 const isConnected = connectedDevices.has(device.id);
                 const statusClass = isConnected ? 'status-connected' : 'status-disconnected';
                 const statusText = isConnected ? 'Connected' : 'Disconnected';
