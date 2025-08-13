@@ -408,12 +408,19 @@
         function displayDevices() {
             const container = document.getElementById('devices-container');
             
-            if (devices.length === 0) {
-                container.innerHTML = '<div class="loading">No devices discovered yet. Make sure Bluetooth is enabled and devices are advertising.</div>';
+            // Filter out devices without a name (Unknown Devices)
+            const namedDevices = devices.filter(device => device.name && device.name.trim() !== '');
+            
+            if (namedDevices.length === 0) {
+                if (devices.length === 0) {
+                    container.innerHTML = '<div class="loading">No devices discovered yet. Make sure Bluetooth is enabled and devices are advertising.</div>';
+                } else {
+                    container.innerHTML = '<div class="loading">No named devices found. All discovered devices are unnamed and have been filtered out.</div>';
+                }
                 return;
             }
 
-            const devicesHtml = devices.map(device => {
+            const devicesHtml = namedDevices.map(device => {
                 const isConnected = connectedDevices.has(device.id);
                 const statusClass = isConnected ? 'status-connected' : 'status-disconnected';
                 const statusText = isConnected ? 'Connected' : 'Disconnected';
