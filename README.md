@@ -1,6 +1,6 @@
 # BLE2WebSvc
 
-Building a bridge between BLE devices and Webservices using Resin.io on a Raspberry Pi Zero W
+Building a bridge between BLE devices and Webservices ~~using Resin.io~~ on a Raspberry Pi Zero W
 
 BLE2WebSvc is a Node.js Express web server that acts as a bridge between Bluetooth Low Energy (BLE) devices and web services. It provides both a REST API and a comprehensive web interface for BLE device interaction.
 
