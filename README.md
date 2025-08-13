@@ -95,13 +95,13 @@ For deployment on Raspberry Pi Zero W:
 npm start
 ```
 
-The server will start on port 3000 by default. You can access:
-- **Web Interface**: http://localhost:3000/web
-- **API Endpoints**: http://localhost:3000/ble/*
+The server will start on port 8111 by default. You can access:
+- **Web Interface**: http://localhost:8111/web
+- **API Endpoints**: http://localhost:8111/ble/*
 
 ### Environment Variables
 
-- `PORT`: Server port (default: 3000)
+- `PORT`: Server port (default: 8111)
 - `NODE_ENV`: Environment mode (development/production)
 
 ## Web Interface
