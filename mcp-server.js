@@ -1,14 +1,20 @@
 const net = require('net');
-const EventEmitter = require('events');
 const bleManager = require('./ble-manager');
+const crypto = require('crypto');
 
 class MCPServer {
     constructor(port) {
         this.port = port || process.env.MCP_PORT || 8123;
         this.server = null;
         this.clients = new Set();
-        this.subscriptions = new Map(); // key: socket, value: Map<charKey, listener>
+        this.subscriptions = new Map(); // socket -> Map<deviceId:charUuid, listener>
         this.authToken = process.env.MCP_TOKEN || null;
+
+        // Tool / execution management (MCP SDK)
+        this.tools = new Map(); // toolId -> { meta, handler }
+        this.executions = new Map(); // execId -> { toolId, status, result, cancelFn }
+        this.execSubscribers = new Map(); // execId -> Set(sockets)
+        this._execCounter = 0;
     }
 
     start() {
@@ -23,12 +29,19 @@ class MCPServer {
         if (this.server) this.server.close(callback);
     }
 
+    registerTool(toolDef, handler) {
+        if (!toolDef || !toolDef.id) throw new Error('tool_def_missing_id');
+        if (this.tools.has(toolDef.id)) throw new Error('tool_already_registered');
+        this.tools.set(toolDef.id, { meta: toolDef, handler });
+        return toolDef.id;
+    }
+
     _onConnection(socket) {
         socket.setEncoding('utf8');
         this.clients.add(socket);
         this.subscriptions.set(socket, new Map());
 
-        socket.write(JSON.stringify({id: 'welcome', status: 'ok', server: 'BLE2WebSvc MCP'}) + '\n');
+        socket.write(JSON.stringify({ type: 'mcp/handshake', id: null, payload: { server: 'BLE2WebSvc MCP', version: '1.0' } }) + '\n');
 
         let buffer = '';
         socket.on('data', chunk => {
@@ -45,11 +58,13 @@ class MCPServer {
             this._cleanSubscriptions(socket);
             this.subscriptions.delete(socket);
             this.clients.delete(socket);
+            for (const subs of this.execSubscribers.values()) subs.delete(socket);
         });
 
         socket.on('error', () => {
             this._cleanSubscriptions(socket);
             this.clients.delete(socket);
+            for (const subs of this.execSubscribers.values()) subs.delete(socket);
         });
     }
 
@@ -58,122 +73,239 @@ class MCPServer {
         try {
             msg = JSON.parse(raw);
         } catch (err) {
-            socket.write(JSON.stringify({status: 'error', error: 'invalid_json'}) + '\n');
+            socket.write(JSON.stringify({ type: 'mcp/error', id: null, payload: { code: 'invalid_json' } }) + '\n');
             return;
         }
 
-        // optional auth requirement
-        if (this.authToken) {
-            if (!socket._mcpAuthenticated) {
-                if (!msg.cmd || msg.cmd !== 'auth') {
-                    socket.write(JSON.stringify({status: 'error', error: 'authentication_required'}) + '\n');
-                    return;
-                }
-                if (msg.token !== this.authToken) {
-                    socket.write(JSON.stringify({status: 'error', error: 'invalid_token'}) + '\n');
-                    return;
-                }
-                socket._mcpAuthenticated = true;
-                socket.write(JSON.stringify({status: 'ok', id: msg.id || null, msg: 'authenticated'}) + '\n');
+        // normalize envelope
+        const type = (msg.type && String(msg.type).toLowerCase()) || null;
+        const id = msg.id || null;
+        const payload = msg.payload || {};
+
+        // auth if required (expecting type 'mcp/auth' with payload.token)
+        if (this.authToken && !socket._mcpAuthenticated) {
+            if (type !== 'mcp/auth') {
+                socket.write(JSON.stringify({ type: 'mcp/error', id, payload: { code: 'authentication_required' } }) + '\n');
                 return;
             }
+            const token = payload.token;
+            if (token !== this.authToken) {
+                socket.write(JSON.stringify({ type: 'mcp/error', id, payload: { code: 'invalid_token' } }) + '\n');
+                return;
+            }
+            socket._mcpAuthenticated = true;
+            socket.write(JSON.stringify({ type: 'mcp/auth.ok', id, payload: { msg: 'authenticated' } }) + '\n');
+            return;
         }
 
-        const cmd = msg.cmd && msg.cmd.toLowerCase();
         try {
-            switch (cmd) {
-                case 'listdevices':
-                case 'devices': {
-                    const devs = await bleManager.getDevices();
-                    socket.write(JSON.stringify({status: 'ok', id: msg.id || null, devices: devs}) + '\n');
-                    break;
-                }
-                case 'connect': {
-                    const deviceId = msg.deviceId;
-                    if (!deviceId) throw new Error('missing_deviceId');
-                    const res = await bleManager.connectDevice(deviceId);
-                    socket.write(JSON.stringify({status: 'ok', id: msg.id || null, device: res}) + '\n');
-                    break;
-                }
-                case 'disconnect': {
-                    const deviceId = msg.deviceId;
-                    if (!deviceId) throw new Error('missing_deviceId');
-                    const res = await bleManager.disconnectDevice(deviceId);
-                    socket.write(JSON.stringify({status: 'ok', id: msg.id || null, device: res}) + '\n');
-                    break;
-                }
-                case 'services': {
-                    const {deviceId} = msg;
-                    if (!deviceId) throw new Error('missing_deviceId');
-                    const services = await bleManager.getServices(deviceId);
-                    socket.write(JSON.stringify({status: 'ok', id: msg.id || null, services}) + '\n');
-                    break;
-                }
-                case 'characteristics': {
-                    const {deviceId, serviceUuid} = msg;
-                    if (!deviceId || !serviceUuid) throw new Error('missing_params');
-                    const chars = await bleManager.getCharacteristics(deviceId, serviceUuid);
-                    socket.write(JSON.stringify({status: 'ok', id: msg.id || null, characteristics: chars}) + '\n');
-                    break;
-                }
-                case 'read': {
-                    const {deviceId, characteristicUuid} = msg;
-                    if (!deviceId || !characteristicUuid) throw new Error('missing_params');
-                    const value = await bleManager.readCharacteristic(deviceId, characteristicUuid);
-                    socket.write(JSON.stringify({status: 'ok', id: msg.id || null, characteristicUuid, value}) + '\n');
-                    break;
-                }
-                case 'write': {
-                    const {deviceId, characteristicUuid, value, withoutResponse} = msg;
-                    if (!deviceId || !characteristicUuid || !value) throw new Error('missing_params');
-                    await bleManager.writeCharacteristic(deviceId, characteristicUuid, value, !!withoutResponse);
-                    socket.write(JSON.stringify({status: 'ok', id: msg.id || null, msg: 'written'}) + '\n');
-                    break;
-                }
-                case 'subscribe': {
-                    const {deviceId, characteristicUuid} = msg;
-                    if (!deviceId || !characteristicUuid) throw new Error('missing_params');
-                    // subscribe via bleManager; expected to return an EventEmitter or callback registration
-                    const listener = (data) => {
-                        socket.write(JSON.stringify({
-                            status: 'notification',
-                            deviceId,
-                            characteristicUuid,
-                            data: data.toString('hex'),
-                            ts: new Date().toISOString()
-                        }) + '\n');
-                    };
-                    await bleManager.subscribe(deviceId, characteristicUuid, listener);
-                    this.subscriptions.get(socket).set(`${deviceId}:${characteristicUuid}`, listener);
-                    socket.write(JSON.stringify({status: 'ok', id: msg.id || null, msg: 'subscribed'}) + '\n');
-                    break;
-                }
-                case 'unsubscribe': {
-                    const {deviceId, characteristicUuid} = msg;
-                    if (!deviceId || !characteristicUuid) throw new Error('missing_params');
-                    const key = `${deviceId}:${characteristicUuid}`;
-                    const listener = this.subscriptions.get(socket).get(key);
-                    if (listener) {
-                        await bleManager.unsubscribe(deviceId, characteristicUuid, listener);
-                        this.subscriptions.get(socket).delete(key);
-                        socket.write(JSON.stringify({status: 'ok', id: msg.id || null, msg: 'unsubscribed'}) + '\n');
-                    } else {
-                        socket.write(JSON.stringify({status: 'error', id: msg.id || null, error: 'not_subscribed'}) + '\n');
-                    }
-                    break;
-                }
-                case 'getnotifications': {
-                    const {deviceId, characteristicUuid} = msg;
-                    if (!deviceId || !characteristicUuid) throw new Error('missing_params');
-                    const notifications = await bleManager.getNotifications(deviceId, characteristicUuid);
-                    socket.write(JSON.stringify({status: 'ok', id: msg.id || null, notifications}) + '\n');
-                    break;
-                }
-                default:
-                    socket.write(JSON.stringify({status: 'error', id: msg.id || null, error: 'unsupported_command'}) + '\n');
+            // Tool discovery
+            if (type === 'mcp.tools.discover' || type === 'mcp.tools.list') {
+                const list = [];
+                for (const [tid, t] of this.tools.entries()) list.push(Object.assign({ id: tid }, t.meta));
+                socket.write(JSON.stringify({ type: 'mcp.tools.list.result', id, payload: { tools: list } }) + '\n');
+                return;
             }
+
+            if (type === 'mcp.tool.info') {
+                const toolId = payload.toolId;
+                if (!toolId) throw new Error('missing_toolId');
+                const entry = this.tools.get(toolId);
+                if (!entry) throw new Error('tool_not_found');
+                socket.write(JSON.stringify({ type: 'mcp.tool.info.result', id, payload: { tool: Object.assign({ id: toolId }, entry.meta) } }) + '\n');
+                return;
+            }
+
+            // Tool execution
+            if (type === 'mcp.tool.execute') {
+                const toolId = payload.toolId;
+                if (!toolId) throw new Error('missing_toolId');
+                const entry = this.tools.get(toolId);
+                if (!entry) throw new Error('tool_not_found');
+
+                const execId = this._generateExecId();
+                this.executions.set(execId, { toolId, status: 'running', result: null, cancelFn: null });
+                this.execSubscribers.set(execId, new Set([socket]));
+
+                const broadcast = (evtType, data) => {
+                    const msg = JSON.stringify({ type: 'mcp.tool.event', id: null, payload: { event: evtType, execId, toolId, data, ts: new Date().toISOString() } }) + '\n';
+                    const subs = this.execSubscribers.get(execId) || new Set();
+                    for (const s of subs) {
+                        try { s.write(msg); } catch (_) {}
+                    }
+                };
+
+                const onProgress = (p) => broadcast('progress', p);
+
+                (async () => {
+                    try {
+                        const maybe = await entry.handler(payload.input, payload.context || {}, onProgress);
+                        if (maybe && typeof maybe === 'object' && typeof maybe.cancel === 'function') {
+                            this.executions.get(execId).cancelFn = maybe.cancel;
+                            this.executions.get(execId).result = maybe.result || null;
+                        } else {
+                            this.executions.get(execId).result = maybe;
+                        }
+                        this.executions.get(execId).status = 'completed';
+                        broadcast('completed', this.executions.get(execId).result);
+                    } catch (err) {
+                        this.executions.get(execId).status = 'failed';
+                        this.executions.get(execId).result = { error: err && err.message ? err.message : String(err) };
+                        broadcast('failed', this.executions.get(execId).result);
+                    }
+                })();
+
+                socket.write(JSON.stringify({ type: 'mcp.tool.execute.started', id, payload: { execId, toolId } }) + '\n');
+                return;
+            }
+
+            // Execution subscription management
+            if (type === 'mcp.exec.subscribe') {
+                const execId = payload.execId;
+                if (!execId) throw new Error('missing_execId');
+                if (!this.executions.has(execId)) throw new Error('execution_not_found');
+                const subs = this.execSubscribers.get(execId) || new Set();
+                subs.add(socket);
+                this.execSubscribers.set(execId, subs);
+                socket.write(JSON.stringify({ type: 'mcp.exec.subscribe.ack', id, payload: { execId } }) + '\n');
+                return;
+            }
+
+            if (type === 'mcp.exec.unsubscribe') {
+                const execId = payload.execId;
+                if (!execId) throw new Error('missing_execId');
+                const subs = this.execSubscribers.get(execId);
+                if (subs) subs.delete(socket);
+                socket.write(JSON.stringify({ type: 'mcp.exec.unsubscribe.ack', id, payload: { execId } }) + '\n');
+                return;
+            }
+
+            if (type === 'mcp.exec.status') {
+                const execId = payload.execId;
+                if (!execId) throw new Error('missing_execId');
+                const rec = this.executions.get(execId);
+                if (!rec) throw new Error('execution_not_found');
+                socket.write(JSON.stringify({ type: 'mcp.exec.status.result', id, payload: { execId, toolId: rec.toolId, state: rec.status, result: rec.result } }) + '\n');
+                return;
+            }
+
+            if (type === 'mcp.exec.cancel') {
+                const execId = payload.execId;
+                if (!execId) throw new Error('missing_execId');
+                const rec = this.executions.get(execId);
+                if (!rec) throw new Error('execution_not_found');
+                if (rec.cancelFn && typeof rec.cancelFn === 'function') {
+                    try {
+                        await rec.cancelFn();
+                        rec.status = 'cancelled';
+                        socket.write(JSON.stringify({ type: 'mcp.exec.cancel.ack', id, payload: { execId, status: 'cancelled' } }) + '\n');
+                        const s = JSON.stringify({ type: 'mcp.tool.event', id: null, payload: { event: 'cancelled', execId, toolId: rec.toolId, ts: new Date().toISOString() } }) + '\n';
+                        const subs = this.execSubscribers.get(execId) || new Set();
+                        for (const sub of subs) try { sub.write(s); } catch (_) {}
+                    } catch (err) {
+                        throw new Error('cancel_failed');
+                    }
+                } else {
+                    throw new Error('not_cancellable');
+                }
+                return;
+            }
+
+            // BLE operations via MCP envelope
+            if (type === 'mcp.ble.devices') {
+                const devs = await bleManager.getDevices();
+                socket.write(JSON.stringify({ type: 'mcp.ble.devices.result', id, payload: { devices: devs } }) + '\n');
+                return;
+            }
+
+            if (type === 'mcp.ble.connect') {
+                const deviceId = payload.deviceId;
+                if (!deviceId) throw new Error('missing_deviceId');
+                const res = await bleManager.connectDevice(deviceId);
+                socket.write(JSON.stringify({ type: 'mcp.ble.connect.result', id, payload: { device: res } }) + '\n');
+                return;
+            }
+
+            if (type === 'mcp.ble.disconnect') {
+                const deviceId = payload.deviceId;
+                if (!deviceId) throw new Error('missing_deviceId');
+                const res = await bleManager.disconnectDevice(deviceId);
+                socket.write(JSON.stringify({ type: 'mcp.ble.disconnect.result', id, payload: { device: res } }) + '\n');
+                return;
+            }
+
+            if (type === 'mcp.ble.services') {
+                const deviceId = payload.deviceId;
+                if (!deviceId) throw new Error('missing_deviceId');
+                const services = await bleManager.getServices(deviceId);
+                socket.write(JSON.stringify({ type: 'mcp.ble.services.result', id, payload: { services } }) + '\n');
+                return;
+            }
+
+            if (type === 'mcp.ble.characteristics') {
+                const { deviceId, serviceUuid } = payload;
+                if (!deviceId || !serviceUuid) throw new Error('missing_params');
+                const chars = await bleManager.getCharacteristics(deviceId, serviceUuid);
+                socket.write(JSON.stringify({ type: 'mcp.ble.characteristics.result', id, payload: { characteristics: chars } }) + '\n');
+                return;
+            }
+
+            if (type === 'mcp.ble.read') {
+                const { deviceId, characteristicUuid } = payload;
+                if (!deviceId || !characteristicUuid) throw new Error('missing_params');
+                const value = await bleManager.readCharacteristic(deviceId, characteristicUuid);
+                socket.write(JSON.stringify({ type: 'mcp.ble.read.result', id, payload: { characteristicUuid, value } }) + '\n');
+                return;
+            }
+
+            if (type === 'mcp.ble.write') {
+                const { deviceId, characteristicUuid, value, withoutResponse } = payload;
+                if (!deviceId || !characteristicUuid || typeof value === 'undefined') throw new Error('missing_params');
+                await bleManager.writeCharacteristic(deviceId, characteristicUuid, value, !!withoutResponse);
+                socket.write(JSON.stringify({ type: 'mcp.ble.write.result', id, payload: { msg: 'written' } }) + '\n');
+                return;
+            }
+
+            if (type === 'mcp.ble.subscribe') {
+                const { deviceId, characteristicUuid } = payload;
+                if (!deviceId || !characteristicUuid) throw new Error('missing_params');
+                const listener = (data) => {
+                    const nm = { type: 'mcp.ble.notification', id: null, payload: { deviceId, characteristicUuid, data: data.toString('hex'), ts: new Date().toISOString() } };
+                    try { socket.write(JSON.stringify(nm) + '\n'); } catch (_) {}
+                };
+                await bleManager.subscribe(deviceId, characteristicUuid, listener);
+                this.subscriptions.get(socket).set(`${deviceId}:${characteristicUuid}`, listener);
+                socket.write(JSON.stringify({ type: 'mcp.ble.subscribe.result', id, payload: { msg: 'subscribed' } }) + '\n');
+                return;
+            }
+
+            if (type === 'mcp.ble.unsubscribe') {
+                const { deviceId, characteristicUuid } = payload;
+                if (!deviceId || !characteristicUuid) throw new Error('missing_params');
+                const key = `${deviceId}:${characteristicUuid}`;
+                const listener = this.subscriptions.get(socket).get(key);
+                if (listener) {
+                    await bleManager.unsubscribe(deviceId, characteristicUuid, listener);
+                    this.subscriptions.get(socket).delete(key);
+                    socket.write(JSON.stringify({ type: 'mcp.ble.unsubscribe.result', id, payload: { msg: 'unsubscribed' } }) + '\n');
+                } else {
+                    throw new Error('not_subscribed');
+                }
+                return;
+            }
+
+            if (type === 'mcp.ble.getnotifications') {
+                const { deviceId, characteristicUuid } = payload;
+                if (!deviceId || !characteristicUuid) throw new Error('missing_params');
+                const notifications = await bleManager.getNotifications(deviceId, characteristicUuid);
+                socket.write(JSON.stringify({ type: 'mcp.ble.getnotifications.result', id, payload: { notifications } }) + '\n');
+                return;
+            }
+
+            // unknown / unsupported
+            socket.write(JSON.stringify({ type: 'mcp/error', id, payload: { code: 'unsupported_command' } }) + '\n');
         } catch (err) {
-            socket.write(JSON.stringify({status: 'error', id: msg.id || null, error: err.message || String(err)}) + '\n');
+            socket.write(JSON.stringify({ type: 'mcp/error', id, payload: { code: err.message || String(err) } }) + '\n');
         }
     }
 
@@ -182,12 +314,22 @@ class MCPServer {
         if (!map) return;
         for (const [key, listener] of map.entries()) {
             const [deviceId, characteristicUuid] = key.split(':');
-            // best-effort cleanup
             try {
                 bleManager.unsubscribe(deviceId, characteristicUuid, listener).catch(()=>{});
             } catch {}
         }
         map.clear();
+
+        for (const [execId, rec] of this.executions.entries()) {
+            const subs = this.execSubscribers.get(execId);
+            if (subs) subs.delete(socket);
+        }
+    }
+
+    _generateExecId() {
+        if (crypto && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+        this._execCounter += 1;
+        return `${Date.now()}-${process.pid}-${this._execCounter}`;
     }
 }
 

@@ -4,26 +4,47 @@ jest.mock('../ble-manager'); // stub ble-manager functions
 const bleManager = require('../ble-manager');
 const mcp = require('../mcp-server');
 
-describe('MCP server', () => {
-    beforeAll(() => {
-        bleManager.getDevices.mockResolvedValue([{id:'dev1', name:'Test'}]);
-        mcp.start(8124);
+describe('MCP server (SDK envelope)', () => {
+  beforeAll(async () => {
+    process.env.MCP_PORT = '8124';
+    bleManager.getDevices.mockResolvedValue([{ id: 'dev1', name: 'Test' }]);
+    mcp.start();
+    // give server a moment to bind
+    await new Promise(r => setTimeout(r, 50));
+  });
+
+  afterAll(done => {
+    mcp.stop(done);
+  });
+
+  test('responds with device list for mcp.ble.devices', (done) => {
+    const client = net.createConnection({ port: 8124, host: '127.0.0.1' }, () => {
+      // send MCP SDK envelope
+      client.write(JSON.stringify({ type: 'mcp.ble.devices', id: 'r1', payload: {} }) + '\n');
     });
-    afterAll(done => {
-        mcp.stop(done);
+    client.setEncoding('utf8');
+
+    let buffer = '';
+    client.on('data', (chunk) => {
+      buffer += chunk;
+      let idx;
+      while ((idx = buffer.indexOf('\n')) >= 0) {
+        const line = buffer.slice(0, idx).trim();
+        buffer = buffer.slice(idx + 1);
+        if (!line) continue;
+        const msg = JSON.parse(line);
+        if (msg.type === 'mcp.ble.devices.result') {
+          expect(msg.payload).toHaveProperty('devices');
+          expect(Array.isArray(msg.payload.devices)).toBe(true);
+          expect(msg.payload.devices[0].id).toBe('dev1');
+          client.end();
+          done();
+        }
+      }
     });
 
-    test('returns device list on listDevices', (done) => {
-        const client = net.createConnection(8124, '127.0.0.1', () => {
-            client.write(JSON.stringify({id:'r1', cmd:'listDevices'}) + '\n');
-        });
-        client.setEncoding('utf8');
-        client.on('data', (data) => {
-            if (data.includes('"devices"')) {
-                expect(data).toMatch(/Test/);
-                client.end();
-                done();
-            }
-        });
+    client.on('error', (err) => {
+      done(err);
     });
+  });
 });
