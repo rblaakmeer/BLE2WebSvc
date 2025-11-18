@@ -6,6 +6,7 @@
  */
 var express = require('express');
 const bleManager = require('./ble-manager.js'); // Manages BLE interactions.
+const mcpServer = require('./mcp-server');
 
 // Global Error Handlers - These should be defined early.
 // Handles unhandled promise rejections.
@@ -397,4 +398,6 @@ if (require.main === module) {
   const server = app.listen(port, () => { // 'server' var is now local to this block
     console.log(`BLE2WebSvc server listening on port ${port}`);
   });
+  const mcpPort = process.env.MCP_PORT || 8123;
+  mcpServer.start(mcpPort);
 }

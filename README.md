@@ -508,4 +508,40 @@ The project includes Docker support for containerized deployment. The container 
 - Use browser developer tools for web interface debugging
 - Enable Noble debug mode: `DEBUG=noble* npm start`
 
----
+## MCP (Message Control Protocol) — TCP JSON interface
+
+This project includes a simple MCP server that exposes BLE operations over a TCP JSON protocol (one JSON object per line).
+
+Start the MCP server:
+```bash
+export MCP_PORT=8123
+export MCP_TOKEN=secret   # optional
+npm start
+```
+
+Example commands (connect using netcat or your custom client; each command is JSON + newline):
+
+- List devices:
+{"id":"req1","cmd":"listDevices"}
+
+- Connect:
+{"id":"req2","cmd":"connect","deviceId":"abc123"}
+
+- Read characteristic:
+{"id":"req3","cmd":"read","deviceId":"abc123","characteristicUuid":"ffe1"}
+
+- Write:
+{"id":"req4","cmd":"write","deviceId":"abc123","characteristicUuid":"ffe1","value":"0a0b0c"}
+
+- Subscribe:
+{"id":"req5","cmd":"subscribe","deviceId":"abc123","characteristicUuid":"ffe1"}
+
+Notifications will be sent back as messages such as:
+{"status":"notification","deviceId":"abc123","characteristicUuid":"ffe1","data":"0a0b0c","ts":"2025-11-18T12:00:00Z"}
+
+Authentication:
+- If `MCP_TOKEN` is set, client must send:
+{"cmd":"auth","token":"secret"}
+before any other command.
+
+This MCP server uses ble-manager methods (getDevices, connectDevice, disconnectDevice, getServices, getCharacteristics, readCharacteristic, writeCharacteristic, subscribe, unsubscribe, getNotifications) — if your ble-manager uses different names, adapt the calls.
