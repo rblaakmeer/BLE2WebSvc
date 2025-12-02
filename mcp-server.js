@@ -17,10 +17,19 @@ class MCPServer {
         this._execCounter = 0;
     }
 
-    start() {
+    start(port, callback) {
+        if (typeof port === 'function') {
+            callback = port;
+            port = null;
+        }
+        this.port = port || this.port;
         this.server = net.createServer(socket => this._onConnection(socket));
-        this.server.listen(this.port);
-        console.log(`MCP server listening on ${this.port}`);
+        this.server.listen(this.port, () => {
+            console.log(`MCP server listening on ${this.port}`);
+            if (callback) {
+                callback();
+            }
+        });
         return this.server;
     }
 
@@ -213,7 +222,7 @@ class MCPServer {
 
             // BLE operations via MCP envelope
             if (type === 'mcp.ble.devices') {
-                const devs = await bleManager.getDevices();
+                const devs = await bleManager.getDiscoveredPeripherals();
                 socket.write(JSON.stringify({ type: 'mcp.ble.devices.result', id, payload: { devices: devs } }) + '\n');
                 return;
             }

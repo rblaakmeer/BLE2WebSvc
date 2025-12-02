@@ -5,16 +5,15 @@ const bleManager = require('../ble-manager');
 const mcp = require('../mcp-server');
 
 describe('MCP server (SDK envelope)', () => {
-  beforeAll(async () => {
-    process.env.MCP_PORT = '8124';
-    bleManager.getDevices.mockResolvedValue([{ id: 'dev1', name: 'Test' }]);
-    mcp.start();
-    // give server a moment to bind
-    await new Promise(r => setTimeout(r, 50));
+  beforeAll(done => {
+    bleManager.getDiscoveredPeripherals.mockResolvedValue([{ id: 'dev1', name: 'Test' }]);
+    mcp.start(8124, done);
   });
 
   afterAll(done => {
-    mcp.stop(done);
+    mcp.stop(() => {
+        done();
+    });
   });
 
   test('responds with device list for mcp.ble.devices', (done) => {

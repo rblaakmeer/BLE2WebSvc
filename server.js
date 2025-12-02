@@ -27,9 +27,6 @@ var app = express();
 // Middleware to parse incoming JSON requests.
 app.use(express.json());
 
-// Configure MIME types for static files
-express.static.mime.define({'text/javascript': ['js']});
-
 // Serve static files from public directory
 app.use('/web', express.static('public'));
 app.get('/webble', (req, res) => {
