@@ -7,6 +7,8 @@
 var express = require('express');
 const bleManager = require('./ble-manager.js'); // Manages BLE interactions.
 const mcpServer = require('./mcp-server');
+const cors = require('cors');
+const rateLimit = require('express-rate-limit');
 
 // Global Error Handlers - These should be defined early.
 // Handles unhandled promise rejections.
@@ -27,10 +29,38 @@ var app = express();
 // Middleware to parse incoming JSON requests.
 app.use(express.json());
 
+// CORS configuration
+const corsOrigin = process.env.CORS_ORIGIN || '*';
+app.use(cors({ origin: corsOrigin }));
+
+// Rate limiting for API routes
+const windowMs = parseInt(process.env.RATE_LIMIT_WINDOW_MS || '60000', 10); // 1 minute default
+const maxReqs = parseInt(process.env.RATE_LIMIT_MAX || '120', 10); // 120 reqs/min default
+const apiLimiter = rateLimit({ windowMs, max: maxReqs, standardHeaders: true, legacyHeaders: false });
+app.use('/ble', apiLimiter);
+
+// API key auth for BLE routes (no-op if API_KEY is not set)
+const requiredApiKey = process.env.API_KEY || null;
+app.use('/ble', (req, res, next) => {
+  if (!requiredApiKey) {
+    return next();
+  }
+  const provided = req.get('x-api-key') || req.query.api_key;
+  if (provided !== requiredApiKey) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  next();
+});
+
 // Serve static files from public directory
 app.use('/web', express.static('public'));
 app.get('/webble', (req, res) => {
   res.sendFile(__dirname + '/public/webble.html');
+});
+
+// Simple health endpoint (no auth)
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok' });
 });
 
 /**

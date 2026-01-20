@@ -18,6 +18,94 @@ This fork implements an MCP (Model Context Protocol) server compatible with the 
 - Linux (Raspberry Pi OS recommended for Pi Zero W)
 - BLE-capable hardware
 
+## Local development and testing
+
+Run the HTTP API and web UI locally, and optionally protect BLE endpoints with an API key.
+
+### 1) Install dependencies
+```bash
+npm install
+```
+
+### 2) Configure environment (optional)
+- `PORT` – HTTP server port (default: 8111)
+- `API_KEY` – If set, required on all `/ble/*` endpoints via header `x-api-key` or query `?api_key=`
+- `CORS_ORIGIN` – Allowed origin for CORS (default: `*`)
+- `RATE_LIMIT_WINDOW_MS` – Rate limit window in ms (default: `60000`)
+- `RATE_LIMIT_MAX` – Max requests per window per IP for `/ble` (default: `120`)
+
+Windows (PowerShell):
+```powershell
+$env:API_KEY = "dev-key-123"      # optional
+$env:CORS_ORIGIN = "*"            # optional
+$env:RATE_LIMIT_WINDOW_MS = "60000"
+$env:RATE_LIMIT_MAX = "120"
+```
+
+Linux/macOS:
+```bash
+export API_KEY=dev-key-123      # optional
+export CORS_ORIGIN="*"         # optional
+export RATE_LIMIT_WINDOW_MS=60000
+export RATE_LIMIT_MAX=120
+```
+
+### 3) Start the server
+```bash
+npm start
+```
+The server listens on `http://localhost:8111` by default. Health check: `GET /health`.
+
+### 4) Open the web UI
+Visit `http://localhost:8111/web` in your browser. Use the UI to discover, connect, read/write, and subscribe.
+
+### 5) Call the API directly
+If `API_KEY` is set, include it in `x-api-key` header (or `?api_key=` query).
+
+PowerShell examples:
+```powershell
+$headers = @{ "x-api-key" = "dev-key-123" }  # omit if API_KEY not set
+Invoke-RestMethod -Headers $headers -Uri "http://localhost:8111/ble/devices"
+
+$deviceId = "<your_device_id>"
+Invoke-RestMethod -Headers $headers -Method Post -Uri "http://localhost:8111/ble/devices/$deviceId/connect"
+Invoke-RestMethod -Headers $headers -Uri "http://localhost:8111/ble/devices/$deviceId/services"
+Invoke-RestMethod -Headers $headers -Uri "http://localhost:8111/ble/devices/$deviceId/services/<service_uuid>/characteristics"
+Invoke-RestMethod -Headers $headers -Uri "http://localhost:8111/ble/devices/$deviceId/characteristics/<char_uuid>"
+
+$body = @{ value = "0aff" ; withoutResponse = $false } | ConvertTo-Json
+Invoke-RestMethod -Headers $headers -Method Post -ContentType "application/json" -Body $body -Uri "http://localhost:8111/ble/devices/$deviceId/characteristics/<char_uuid>"
+
+Invoke-RestMethod -Headers $headers -Method Post -Uri "http://localhost:8111/ble/devices/$deviceId/characteristics/<char_uuid>/subscribe"
+Invoke-RestMethod -Headers $headers -Uri "http://localhost:8111/ble/devices/$deviceId/characteristics/<char_uuid>/notifications?since=0&limit=10"
+Invoke-RestMethod -Headers $headers -Method Post -Uri "http://localhost:8111/ble/devices/$deviceId/characteristics/<char_uuid>/unsubscribe"
+```
+
+bash (curl) examples:
+```bash
+API=http://localhost:8111
+HDR=( -H "x-api-key: ${API_KEY}" )   # omit if API_KEY not set
+
+curl -sS "$API/health"
+curl -sS "$API/ble/devices" "${HDR[@]}"
+
+DEVICE_ID="<your_device_id>"
+curl -sS -X POST "$API/ble/devices/$DEVICE_ID/connect" "${HDR[@]}"
+curl -sS "$API/ble/devices/$DEVICE_ID/services" "${HDR[@]}"
+curl -sS "$API/ble/devices/$DEVICE_ID/services/<service_uuid>/characteristics" "${HDR[@]}"
+curl -sS "$API/ble/devices/$DEVICE_ID/characteristics/<char_uuid>" "${HDR[@]}"
+curl -sS -X POST -H 'Content-Type: application/json' -d '{"value":"0aff","withoutResponse":false}' "$API/ble/devices/$DEVICE_ID/characteristics/<char_uuid>" "${HDR[@]}"
+curl -sS -X POST "$API/ble/devices/$DEVICE_ID/characteristics/<char_uuid>/subscribe" "${HDR[@]}"
+curl -sS "$API/ble/devices/$DEVICE_ID/characteristics/<char_uuid>/notifications?since=0&limit=10" "${HDR[@]}"
+curl -sS -X POST "$API/ble/devices/$DEVICE_ID/characteristics/<char_uuid>/unsubscribe" "${HDR[@]}"
+```
+
+### Troubleshooting
+- Ensure your machine has a BLE adapter enabled and accessible to Node.
+- If the browser shows CORS errors when using another origin, set `CORS_ORIGIN` appropriately.
+- If rate limiting triggers during testing, increase `RATE_LIMIT_MAX` or window.
+- If you set `API_KEY` and the web UI can’t call APIs, add the `x-api-key` header via a proxy or disable `API_KEY` during local UI testing.
+
 ## Starting the MCP Server
 
 Set optional environment variables and start the Node server:
