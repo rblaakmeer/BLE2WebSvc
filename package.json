@@ -31,8 +31,8 @@
   },
   "dependencies": {
     "@abandonware/noble": "^1.9.2-26",
-    "express": "^5.2.1",
     "cors": "^2.8.5",
+    "express": "^5.2.1",
     "express-rate-limit": "^7.1.5"
   },
   "devDependencies": {
@@ -42,6 +42,7 @@
     "supertest": "^7.1.4"
   },
   "overrides": {
-    "glob": "10.5.0"
+    "glob": "10.5.0",
+    "tar": "7.5.3"
   }
 }
