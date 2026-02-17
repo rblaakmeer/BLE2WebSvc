@@ -98,7 +98,17 @@ class MCPServer {
                 return;
             }
             const token = payload.token;
-            if (token !== this.authToken) {
+            // Use timing-safe comparison to prevent timing attacks
+            let tokenMatch = false;
+            try {
+                if (token && typeof token === 'string' && token.length === this.authToken.length) {
+                    tokenMatch = crypto.timingSafeEqual(Buffer.from(token), Buffer.from(this.authToken));
+                }
+            } catch (err) {
+                // timingSafeEqual throws if lengths differ
+                tokenMatch = false;
+            }
+            if (!tokenMatch) {
                 socket.write(JSON.stringify({ type: 'mcp/error', id, payload: { code: 'invalid_token' } }) + '\n');
                 return;
             }

@@ -9,6 +9,55 @@ const bleManager = require('./ble-manager.js'); // Manages BLE interactions.
 const mcpServer = require('./mcp-server');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
+const crypto = require('crypto');
+
+// Security helpers
+const SecurityHelpers = {
+  // Validate UUID format (standard UUID v4 format)
+  isValidUUID: (uuid) => {
+    if (typeof uuid !== 'string') return false;
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$|^[0-9a-f]{32}$|^[0-9a-f]{4}$/i;
+    return uuidRegex.test(uuid);
+  },
+  
+  // Validate device ID format (alphanumeric and common separators)
+  isValidDeviceId: (deviceId) => {
+    if (typeof deviceId !== 'string') return false;
+    return /^[a-zA-Z0-9_:-]+$/.test(deviceId) && deviceId.length > 0 && deviceId.length <= 255;
+  },
+  
+  // Map error messages to safe error responses for clients
+  getSafeErrorMessage: (errorMessage, statusCode = 500) => {
+    const errorMap = {
+      'not found': 'Device or resource not found.',
+      'not connected': 'Device is not connected.',
+      'not readable': 'Characteristic is not readable.',
+      'not writable': 'Characteristic is not writable.',
+      'not support': 'Characteristic does not support this operation.',
+      'already connected': 'Device is already connected.',
+      'connecting': 'Device is currently connecting. Please wait.',
+      'disconnected': 'Device has been disconnected.',
+    };
+    
+    if (statusCode === 401 || statusCode === 403) {
+      return 'Access denied.';
+    }
+    
+    for (const [key, value] of Object.entries(errorMap)) {
+      if (errorMessage && errorMessage.toLowerCase().includes(key)) {
+        return value;
+      }
+    }
+    
+    if (statusCode === 400) {
+      return 'Invalid request. Please check your parameters.';
+    }
+    if (statusCode === 404) {
+      return 'Resource not found.';
+    }
+    return 'An error occurred. Please try again later.';
+  }
+};
 
 // Global Error Handlers - These should be defined early.
 // Handles unhandled promise rejections.
@@ -29,8 +78,8 @@ var app = express();
 // Middleware to parse incoming JSON requests.
 app.use(express.json());
 
-// CORS configuration
-const corsOrigin = process.env.CORS_ORIGIN || '*';
+// CORS configuration - default to localhost in development, must be explicitly set in production
+const corsOrigin = process.env.CORS_ORIGIN || (process.env.NODE_ENV === 'production' ? false : 'http://localhost:3000');
 app.use(cors({ origin: corsOrigin }));
 
 // Rate limiting for API routes
@@ -39,6 +88,10 @@ const maxReqs = parseInt(process.env.RATE_LIMIT_MAX || '120', 10); // 120 reqs/m
 const apiLimiter = rateLimit({ windowMs, max: maxReqs, standardHeaders: true, legacyHeaders: false });
 app.use('/ble', apiLimiter);
 
+// Apply rate limiting to all routes to prevent abuse
+const globalLimiter = rateLimit({ windowMs, max: maxReqs * 2, standardHeaders: true, legacyHeaders: false });
+app.use(globalLimiter);
+
 // API key auth for BLE routes (no-op if API_KEY is not set)
 const requiredApiKey = process.env.API_KEY || null;
 app.use('/ble', (req, res, next) => {
@@ -46,14 +99,38 @@ app.use('/ble', (req, res, next) => {
     return next();
   }
   const provided = req.get('x-api-key') || req.query.api_key;
-  if (provided !== requiredApiKey) {
+  // Use timing-safe comparison to prevent timing attacks
+  let keyMatch = false;
+  try {
+    if (provided && typeof provided === 'string' && provided.length === requiredApiKey.length) {
+      keyMatch = crypto.timingSafeEqual(Buffer.from(provided), Buffer.from(requiredApiKey));
+    }
+  } catch (err) {
+    keyMatch = false;
+  }
+  if (!keyMatch) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
   next();
 });
 
-// Serve static files from public directory
-app.use('/web', express.static('public'));
+// Serve static files from public directory - only if explicitly enabled
+if (process.env.SERVE_STATIC !== 'false') {
+  const helmet = require('helmet');
+  // Add security headers for static file serving
+  app.use(helmet.contentSecurityPolicy({
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'"],
+      styleSrc: ["'self'", "'unsafe-inline'"]
+    }
+  }));
+  app.use('/web', express.static('public'));
+} else {
+  app.use('/web', (req, res) => {
+    res.status(403).json({ error: 'Static file serving is disabled' });
+  });
+}
 app.get('/webble', (req, res) => {
   res.sendFile(__dirname + '/public/webble.html');
 });
@@ -75,7 +152,7 @@ app.get('/ble/devices', (req, res) => {
     res.json(devices);
   } catch (error) {
     console.error('API: Error getting discovered devices:', error);
-    res.status(500).json({ error: 'Failed to get discovered devices', details: error.message });
+    res.status(500).json({ error: 'Failed to get discovered devices' });
   }
 });
 
@@ -90,6 +167,12 @@ app.get('/ble/devices', (req, res) => {
  */
 app.post('/ble/devices/:deviceId/connect', async (req, res) => {
   const { deviceId } = req.params;
+  
+  // Validate device ID format
+  if (!SecurityHelpers.isValidDeviceId(deviceId)) {
+    return res.status(400).json({ error: 'Invalid device ID format' });
+  }
+  
   try {
     console.log(`API: Request to connect to ${deviceId}`);
     const connectionResult = await bleManager.connectDevice(deviceId);
@@ -100,7 +183,8 @@ app.post('/ble/devices/:deviceId/connect', async (req, res) => {
     let statusCode = 500;
     if (error.message.includes('not found')) statusCode = 404;
     else if (error.message.includes('already connected') || error.message.includes('connecting') || error.message.includes('Peripheral disconnected during connection process') ) statusCode = 400;
-    res.status(statusCode).json({ error: `Failed to connect to device ${deviceId}`, details: error.message });
+    const safeMessage = SecurityHelpers.getSafeErrorMessage(error.message, statusCode);
+    res.status(statusCode).json({ error: safeMessage });
   }
 });
 
@@ -114,6 +198,12 @@ app.post('/ble/devices/:deviceId/connect', async (req, res) => {
  */
 app.post('/ble/devices/:deviceId/disconnect', async (req, res) => {
   const { deviceId } = req.params;
+  
+  // Validate device ID format
+  if (!SecurityHelpers.isValidDeviceId(deviceId)) {
+    return res.status(400).json({ error: 'Invalid device ID format' });
+  }
+  
   try {
     console.log(`API: Request to disconnect from ${deviceId}`);
     const disconnectionResult = await bleManager.disconnectDevice(deviceId);
@@ -122,7 +212,8 @@ app.post('/ble/devices/:deviceId/disconnect', async (req, res) => {
     console.error(`API: Error disconnecting from ${deviceId}:`, error);
     let statusCode = 500;
     if (error.message.includes('not found') || error.message.includes('not connected')) statusCode = 404;
-    res.status(statusCode).json({ error: `Failed to disconnect from device ${deviceId}`, details: error.message });
+    const safeMessage = SecurityHelpers.getSafeErrorMessage(error.message, statusCode);
+    res.status(statusCode).json({ error: safeMessage });
   }
 });
 
@@ -136,6 +227,12 @@ app.post('/ble/devices/:deviceId/disconnect', async (req, res) => {
  */
 app.get('/ble/devices/:deviceId/services', async (req, res) => {
   const { deviceId } = req.params;
+  
+  // Validate device ID format
+  if (!SecurityHelpers.isValidDeviceId(deviceId)) {
+    return res.status(400).json({ error: 'Invalid device ID format' });
+  }
+  
   try {
     console.log(`API: Request to get services for ${deviceId}`);
     const services = await bleManager.getServices(deviceId);
@@ -144,7 +241,8 @@ app.get('/ble/devices/:deviceId/services', async (req, res) => {
     console.error(`API: Error getting services for ${deviceId}:`, error);
     let statusCode = 500;
     if (error.message.includes('not connected')) statusCode = 404;
-    res.status(statusCode).json({ error: `Failed to get services for device ${deviceId}`, details: error.message });
+    const safeMessage = SecurityHelpers.getSafeErrorMessage(error.message, statusCode);
+    res.status(statusCode).json({ error: safeMessage });
   }
 });
 
@@ -159,6 +257,12 @@ app.get('/ble/devices/:deviceId/services', async (req, res) => {
  */
 app.get('/ble/devices/:deviceId/services/:serviceUuid/characteristics', async (req, res) => {
   const { deviceId, serviceUuid } = req.params;
+  
+  // Validate input formats
+  if (!SecurityHelpers.isValidDeviceId(deviceId) || !SecurityHelpers.isValidUUID(serviceUuid)) {
+    return res.status(400).json({ error: 'Invalid device ID or service UUID format' });
+  }
+  
   try {
     console.log(`API: Request to get characteristics for service ${serviceUuid} on device ${deviceId}`);
     const characteristics = await bleManager.getCharacteristics(deviceId, serviceUuid);
@@ -167,7 +271,8 @@ app.get('/ble/devices/:deviceId/services/:serviceUuid/characteristics', async (r
     console.error(`API: Error getting characteristics for ${deviceId}, service ${serviceUuid}:`, error);
     let statusCode = 500;
     if (error.message.includes('not connected') || error.message.includes('Service not found')) statusCode = 404;
-    res.status(statusCode).json({ error: `Failed to get characteristics for device ${deviceId}, service ${serviceUuid}`, details: error.message });
+    const safeMessage = SecurityHelpers.getSafeErrorMessage(error.message, statusCode);
+    res.status(statusCode).json({ error: safeMessage });
   }
 });
 
@@ -182,16 +287,22 @@ app.get('/ble/devices/:deviceId/services/:serviceUuid/characteristics', async (r
  */
 app.get('/ble/devices/:deviceId/characteristics/:characteristicUuid', async (req, res) => {
   const { deviceId, characteristicUuid } = req.params;
+  
+  // Validate input formats
+  if (!SecurityHelpers.isValidDeviceId(deviceId) || !SecurityHelpers.isValidUUID(characteristicUuid)) {
+    return res.status(400).json({ error: 'Invalid device ID or characteristic UUID format' });
+  }
+  
   try {
     console.log(`API: Request to read characteristic ${characteristicUuid} on device ${deviceId}`);
     const data = await bleManager.readCharacteristic(deviceId, characteristicUuid);
     res.json({ characteristicUuid, value: data });
-  } catch (error)
- {
+  } catch (error) {
     console.error(`API: Error reading characteristic ${characteristicUuid} for ${deviceId}:`, error);
     let statusCode = 500;
     if (error.message.includes('not connected') || error.message.includes('Characteristic not found') || error.message.includes('not readable')) statusCode = 404;
-    res.status(statusCode).json({ error: `Failed to read characteristic ${characteristicUuid} for device ${deviceId}`, details: error.message });
+    const safeMessage = SecurityHelpers.getSafeErrorMessage(error.message, statusCode);
+    res.status(statusCode).json({ error: safeMessage });
   }
 });
 
@@ -212,19 +323,23 @@ app.post('/ble/devices/:deviceId/characteristics/:characteristicUuid', async (re
   const { deviceId, characteristicUuid } = req.params;
   const { value, withoutResponse } = req.body; // `value` should be a hex string.
 
+  // Validate input formats
+  if (!SecurityHelpers.isValidDeviceId(deviceId) || !SecurityHelpers.isValidUUID(characteristicUuid)) {
+    return res.status(400).json({ error: 'Invalid device ID or characteristic UUID format' });
+  }
+  
   // Validate request body: 'value' must be present.
   if (value === undefined) {
-    return res.status(400).json({ error: 'Missing "value" in request body. Please provide a hex string.' });
+    return res.status(400).json({ error: 'Invalid request. Please provide a hex string value.' });
   }
   // Basic validation for hex string format.
   if (typeof value !== 'string' || !/^[0-9a-fA-F]*$/.test(value) || value.length % 2 !== 0) {
       // Allow empty string for some characteristics, but still must be even length if not empty.
       // Corrected regex to allow empty string, but still check for even length if not empty.
       if (value.length > 0 && (value.length % 2 !== 0 || !/^[0-9a-fA-F]+$/.test(value))) {
-        return res.status(400).json({ error: 'Invalid "value" format. Must be a valid hex string with an even number of characters, or an empty string.' });
+        return res.status(400).json({ error: 'Invalid request. Please provide a valid hex string.' });
       }
   }
-
 
   try {
     console.log(`API: Request to write to characteristic ${characteristicUuid} on device ${deviceId} with value ${value}`);
@@ -234,8 +349,9 @@ app.post('/ble/devices/:deviceId/characteristics/:characteristicUuid', async (re
     console.error(`API: Error writing to characteristic ${characteristicUuid} for ${deviceId}:`, error);
     let statusCode = 500;
     if (error.message.includes('not connected') || error.message.includes('Characteristic not found') || error.message.includes('not writable')) statusCode = 404;
-    else if (error.message.includes('Invalid "value" format')) statusCode = 400;
-    res.status(statusCode).json({ error: `Failed to write to characteristic ${characteristicUuid} for device ${deviceId}`, details: error.message });
+    else if (error.message.includes('Invalid') && error.message.includes('format')) statusCode = 400;
+    const safeMessage = SecurityHelpers.getSafeErrorMessage(error.message, statusCode);
+    res.status(statusCode).json({ error: safeMessage });
   }
 });
 
@@ -254,6 +370,11 @@ const activeSubscriptions = new Map();
 app.post('/ble/devices/:deviceId/characteristics/:characteristicUuid/subscribe', async (req, res) => {
   const { deviceId, characteristicUuid } = req.params;
   const subscriptionKey = `${deviceId}-${characteristicUuid}`;
+  
+  // Validate input formats
+  if (!SecurityHelpers.isValidDeviceId(deviceId) || !SecurityHelpers.isValidUUID(characteristicUuid)) {
+    return res.status(400).json({ error: 'Invalid device ID or characteristic UUID format' });
+  }
   
   try {
     console.log(`API: Request to subscribe to characteristic ${characteristicUuid} on device ${deviceId}`);
@@ -298,7 +419,8 @@ app.post('/ble/devices/:deviceId/characteristics/:characteristicUuid/subscribe',
     console.error(`API: Error subscribing to characteristic ${characteristicUuid} for ${deviceId}:`, error);
     let statusCode = 500;
     if (error.message.includes('not connected') || error.message.includes('Characteristic not found') || error.message.includes('not support')) statusCode = 404;
-    res.status(statusCode).json({ error: `Failed to subscribe to characteristic ${characteristicUuid} for device ${deviceId}`, details: error.message });
+    const safeMessage = SecurityHelpers.getSafeErrorMessage(error.message, statusCode);
+    res.status(statusCode).json({ error: safeMessage });
   }
 });
 
@@ -314,6 +436,11 @@ app.post('/ble/devices/:deviceId/characteristics/:characteristicUuid/subscribe',
 app.post('/ble/devices/:deviceId/characteristics/:characteristicUuid/unsubscribe', async (req, res) => {
   const { deviceId, characteristicUuid } = req.params;
   const subscriptionKey = `${deviceId}-${characteristicUuid}`;
+  
+  // Validate input formats
+  if (!SecurityHelpers.isValidDeviceId(deviceId) || !SecurityHelpers.isValidUUID(characteristicUuid)) {
+    return res.status(400).json({ error: 'Invalid device ID or characteristic UUID format' });
+  }
   
   try {
     console.log(`API: Request to unsubscribe from characteristic ${characteristicUuid} on device ${deviceId}`);
@@ -334,7 +461,8 @@ app.post('/ble/devices/:deviceId/characteristics/:characteristicUuid/unsubscribe
     console.error(`API: Error unsubscribing from characteristic ${characteristicUuid} for ${deviceId}:`, error);
     let statusCode = 500;
     if (error.message.includes('not connected') || error.message.includes('Characteristic not found')) statusCode = 404;
-    res.status(statusCode).json({ error: `Failed to unsubscribe from characteristic ${characteristicUuid} for device ${deviceId}`, details: error.message });
+    const safeMessage = SecurityHelpers.getSafeErrorMessage(error.message, statusCode);
+    res.status(statusCode).json({ error: safeMessage });
   }
 });
 
@@ -352,6 +480,11 @@ app.get('/ble/devices/:deviceId/characteristics/:characteristicUuid/notification
   const { deviceId, characteristicUuid } = req.params;
   const { since, limit = 10 } = req.query;
   const subscriptionKey = `${deviceId}-${characteristicUuid}`;
+  
+  // Validate input formats
+  if (!SecurityHelpers.isValidDeviceId(deviceId) || !SecurityHelpers.isValidUUID(characteristicUuid)) {
+    return res.status(400).json({ error: 'Invalid device ID or characteristic UUID format' });
+  }
   
   try {
     console.log(`API: Request to get notifications for characteristic ${characteristicUuid} on device ${deviceId}`);
@@ -388,7 +521,7 @@ app.get('/ble/devices/:deviceId/characteristics/:characteristicUuid/notification
     
   } catch (error) {
     console.error(`API: Error getting notifications for characteristic ${characteristicUuid} for ${deviceId}:`, error);
-    res.status(500).json({ error: `Failed to get notifications for characteristic ${characteristicUuid} for device ${deviceId}`, details: error.message });
+    res.status(500).json({ error: 'Failed to get notifications' });
   }
 });
 
@@ -412,7 +545,7 @@ app.get('/ble/subscriptions', (req, res) => {
     res.json({ subscriptions });
   } catch (error) {
     console.error('API: Error getting subscriptions:', error);
-    res.status(500).json({ error: 'Failed to get subscriptions', details: error.message });
+    res.status(500).json({ error: 'Failed to get subscriptions' });
   }
 });
 
@@ -424,6 +557,11 @@ if (require.main === module) {
   const port = process.env.PORT || 8111; // Use environment variable for port if available, default to 8111
   const server = app.listen(port, () => { // 'server' var is now local to this block
     console.log(`BLE2WebSvc server listening on port ${port}`);
+    // Log security settings
+    const corsMsg = process.env.CORS_ORIGIN ? `restricted to ${process.env.CORS_ORIGIN}` : 'development mode (localhost:3000)';
+    const authMsg = process.env.MCP_TOKEN ? 'enabled' : 'disabled (MCP_TOKEN not set)';
+    const apiKeyMsg = process.env.API_KEY ? 'enabled' : 'disabled (API_KEY not set)';
+    console.log(`Security: CORS ${corsMsg}, MCP Auth ${authMsg}, API Key Auth ${apiKeyMsg}`);
   });
   const mcpPort = process.env.MCP_PORT || 8123;
   mcpServer.start(mcpPort);

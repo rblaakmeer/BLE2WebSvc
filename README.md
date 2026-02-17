@@ -18,6 +18,23 @@ This fork implements an MCP (Model Context Protocol) server compatible with the 
 - Linux (Raspberry Pi OS recommended for Pi Zero W)
 - BLE-capable hardware
 
+## Security
+
+For production deployments, please review [SECURITY_HARDENING.md](./SECURITY_HARDENING.md) for:
+- Authentication setup (MCP_TOKEN, API_KEY)
+- CORS configuration for your domain
+- Rate limiting settings
+- HTTPS/TLS requirements
+- Firewall recommendations
+
+**Quick Security Checklist for Production**:
+- [ ] Set `MCP_TOKEN` to a strong random value
+- [ ] Set `CORS_ORIGIN` to your frontend domain
+- [ ] Enable `API_KEY` for REST API access
+- [ ] Use HTTPS with a reverse proxy (nginx, Apache)
+- [ ] Set `NODE_ENV=production`
+- [ ] Review and apply the [Security Hardening Guide](./SECURITY_HARDENING.md)
+
 ## Local development and testing
 
 Run the HTTP API and web UI locally, and optionally protect BLE endpoints with an API key.
