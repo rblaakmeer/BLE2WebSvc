@@ -74,6 +74,10 @@ process.on('uncaughtException', (error) => {
 });
 
 var app = express();
+const helmet = require('helmet');
+
+// Apply standard security headers
+app.use(helmet());
 
 // Middleware to parse incoming JSON requests.
 app.use(express.json());
@@ -116,7 +120,6 @@ app.use('/ble', (req, res, next) => {
 
 // Serve static files from public directory - only if explicitly enabled
 if (process.env.SERVE_STATIC !== 'false') {
-  const helmet = require('helmet');
   // Add security headers for static file serving
   app.use(helmet.contentSecurityPolicy({
     directives: {
