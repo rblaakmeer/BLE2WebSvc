@@ -39,12 +39,9 @@ describe('BLE API Endpoints', () => {
 
       expect(response.status).toBe(500);
       expect(response.body).toEqual({
-        error: 'Failed to get discovered devices',
-        details: 'Internal Error',
+        error: 'Failed to get discovered devices'
       });
       expect(consoleErrorSpy).toHaveBeenCalled(); // Verify console.error was called
-      // Optionally, be more specific:
-      // expect(consoleErrorSpy).toHaveBeenCalledWith('API: Error getting discovered devices:', expect.any(Error));
 
       consoleErrorSpy.mockRestore(); // Restore original console.error
     });
@@ -72,8 +69,7 @@ describe('BLE API Endpoints', () => {
 
       expect(response.status).toBe(404);
       expect(response.body).toEqual({
-        error: `Failed to connect to device ${deviceId}`,
-        details: 'Peripheral not found',
+        error: 'Device or resource not found.'
       });
       expect(consoleErrorSpy).toHaveBeenCalled();
       consoleErrorSpy.mockRestore();
@@ -87,8 +83,7 @@ describe('BLE API Endpoints', () => {
 
       expect(response.status).toBe(400);
       expect(response.body).toEqual({
-        error: `Failed to connect to device ${deviceId}`,
-        details: 'Peripheral already connected',
+        error: 'Device is already connected.'
       });
       expect(consoleErrorSpy).toHaveBeenCalled();
       consoleErrorSpy.mockRestore();
@@ -102,8 +97,7 @@ describe('BLE API Endpoints', () => {
 
       expect(response.status).toBe(500);
       expect(response.body).toEqual({
-        error: `Failed to connect to device ${deviceId}`,
-        details: 'Some other connection error',
+        error: 'An error occurred. Please try again later.'
       });
       expect(consoleErrorSpy).toHaveBeenCalled();
       consoleErrorSpy.mockRestore();
@@ -132,8 +126,7 @@ describe('BLE API Endpoints', () => {
 
       expect(response.status).toBe(404);
       expect(response.body).toEqual({
-        error: `Failed to disconnect from device ${deviceId}`,
-        details: 'Peripheral not connected',
+        error: 'Device is not connected.'
       });
       expect(consoleErrorSpy).toHaveBeenCalled();
       consoleErrorSpy.mockRestore();
@@ -147,8 +140,7 @@ describe('BLE API Endpoints', () => {
       
       expect(response.status).toBe(500);
       expect(response.body).toEqual({
-        error: `Failed to disconnect from device ${deviceId}`,
-        details: 'Some other disconnection error',
+        error: 'An error occurred. Please try again later.'
       });
       expect(consoleErrorSpy).toHaveBeenCalled();
       consoleErrorSpy.mockRestore();
@@ -177,8 +169,7 @@ describe('BLE API Endpoints', () => {
 
       expect(response.status).toBe(404);
       expect(response.body).toEqual({
-        error: `Failed to get services for device ${deviceId}`,
-        details: 'Peripheral not connected',
+        error: 'Device is not connected.'
       });
       expect(consoleErrorSpy).toHaveBeenCalled();
       consoleErrorSpy.mockRestore();
@@ -192,8 +183,7 @@ describe('BLE API Endpoints', () => {
 
       expect(response.status).toBe(500);
        expect(response.body).toEqual({
-        error: `Failed to get services for device ${deviceId}`,
-        details: 'Some other error',
+        error: 'An error occurred. Please try again later.'
       });
       expect(consoleErrorSpy).toHaveBeenCalled();
       consoleErrorSpy.mockRestore();
@@ -202,10 +192,10 @@ describe('BLE API Endpoints', () => {
 
   describe('GET /ble/devices/:deviceId/services/:serviceUuid/characteristics', () => {
     const deviceId = 'test-device-id';
-    const serviceUuid = 'service-uuid-1';
+    const serviceUuid = '180d'; // Valid 16-bit UUID
 
     it('should return characteristics for a service successfully', async () => {
-      const mockCharacteristics = [{ uuid: 'char1', name: 'Char 1', properties: ['read'] }];
+      const mockCharacteristics = [{ uuid: '2a37', name: 'Char 1', properties: ['read'] }];
       bleManager.getCharacteristics.mockResolvedValue(mockCharacteristics);
 
       const response = await request(app).get(`/ble/devices/${deviceId}/services/${serviceUuid}/characteristics`);
@@ -223,8 +213,7 @@ describe('BLE API Endpoints', () => {
 
       expect(response.status).toBe(404);
       expect(response.body).toEqual({
-        error: `Failed to get characteristics for device ${deviceId}, service ${serviceUuid}`,
-        details: 'Service not found',
+        error: 'Device or resource not found.'
       });
       expect(consoleErrorSpy).toHaveBeenCalled();
       consoleErrorSpy.mockRestore();
@@ -237,7 +226,7 @@ describe('BLE API Endpoints', () => {
       const response = await request(app).get(`/ble/devices/${deviceId}/services/${serviceUuid}/characteristics`);
 
       expect(response.status).toBe(404);
-       expect(response.body.details).toContain('Peripheral not connected');
+      expect(response.body.error).toContain('Device is not connected.');
       expect(consoleErrorSpy).toHaveBeenCalled();
       consoleErrorSpy.mockRestore();
     });
@@ -249,13 +238,10 @@ describe('BLE API Endpoints', () => {
       const response = await request(app).get(`/ble/devices/${deviceId}/services/${serviceUuid}/characteristics`);
       
       expect(response.status).toBe(500);
-      expect(response.body.details).toContain('Some other error');
+      expect(response.body.error).toContain('An error occurred. Please try again later.');
       expect(consoleErrorSpy).toHaveBeenCalled();
       consoleErrorSpy.mockRestore();
     });
   });
-
-  // Placeholder for next endpoint tests can be added here if desired
-  // it('should have a test placeholder for next endpoint', () => { expect(true).toBe(true); });
 
 });
