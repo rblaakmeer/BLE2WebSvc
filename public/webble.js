@@ -5,18 +5,30 @@ document.addEventListener('DOMContentLoaded', () => {
 
     scanButton.addEventListener('click', scanForDevices);
 
+    function setStatus(container, className, message) {
+        container.replaceChildren();
+        const status = document.createElement('div');
+        status.className = className;
+        status.textContent = message;
+        container.appendChild(status);
+    }
+
+    function appendText(parent, text) {
+        parent.appendChild(document.createTextNode(text));
+    }
+
     async function scanForDevices() {
-        devicesContainer.innerHTML = '<div class="loading">Scanning...</div>';
+        setStatus(devicesContainer, 'loading', 'Scanning...');
         try {
             const device = await navigator.bluetooth.requestDevice({
                 filters: [{ services: ['battery_service'] }, { services: ['heart_rate'] }],
                 optionalServices: ['battery_service', 'heart_rate'] // Add more services as needed
             });
-            devicesContainer.innerHTML = ''; // Clear the container
+            devicesContainer.replaceChildren();
             handleDevice(device);
         } catch (error) {
             console.error('Error scanning for devices:', error);
-            devicesContainer.innerHTML = `<div class="error">Scan failed: ${error.message}</div>`;
+            setStatus(devicesContainer, 'error', `Scan failed: ${error.message}`);
         }
     }
 
@@ -24,18 +36,38 @@ document.addEventListener('DOMContentLoaded', () => {
         const deviceCard = document.createElement('div');
         deviceCard.className = 'device-card';
         deviceCard.id = `device-${device.id}`;
-        deviceCard.innerHTML = `
-            <div class="device-name">${device.name || 'Unknown Device'}</div>
-            <div class="device-info">
-                <strong>ID:</strong> ${device.id}<br>
-                <strong>Status:</strong> <span class="status-text">Disconnected</span>
-            </div>
-            <button class="connect-btn">Connect</button>
-            <div class="services-section" style="display: none;"></div>
-        `;
+
+        const deviceName = document.createElement('div');
+        deviceName.className = 'device-name';
+        deviceName.textContent = device.name || 'Unknown Device';
+
+        const deviceInfo = document.createElement('div');
+        deviceInfo.className = 'device-info';
+        const idLabel = document.createElement('strong');
+        idLabel.textContent = 'ID:';
+        deviceInfo.appendChild(idLabel);
+        appendText(deviceInfo, ` ${device.id}`);
+        deviceInfo.appendChild(document.createElement('br'));
+        const statusLabel = document.createElement('strong');
+        statusLabel.textContent = 'Status:';
+        deviceInfo.appendChild(statusLabel);
+        appendText(deviceInfo, ' ');
+        const statusText = document.createElement('span');
+        statusText.className = 'status-text';
+        statusText.textContent = 'Disconnected';
+        deviceInfo.appendChild(statusText);
+
+        const connectButton = document.createElement('button');
+        connectButton.className = 'connect-btn';
+        connectButton.textContent = 'Connect';
+
+        const servicesSection = document.createElement('div');
+        servicesSection.className = 'services-section';
+        servicesSection.style.display = 'none';
+
+        deviceCard.append(deviceName, deviceInfo, connectButton, servicesSection);
         devicesContainer.appendChild(deviceCard);
 
-        const connectButton = deviceCard.querySelector('.connect-btn');
         connectButton.addEventListener('click', () => toggleConnection(device, deviceCard));
     }
 
@@ -82,70 +114,96 @@ document.addEventListener('DOMContentLoaded', () => {
         connectButton.textContent = 'Connect';
         connectButton.disabled = false;
         servicesSection.style.display = 'none';
-        servicesSection.innerHTML = '';
+        servicesSection.replaceChildren();
         delete connectedDevices[device.id];
     }
 
     async function discoverServices(server, servicesSection) {
-        servicesSection.innerHTML = '<div class="loading">Discovering services...</div>';
+        setStatus(servicesSection, 'loading', 'Discovering services...');
         try {
             const services = await server.getPrimaryServices();
-            let servicesHtml = '<h3>Services</h3>';
-            for (const service of services) {
-                servicesHtml += `
-                    <div class="service-card">
-                        <strong>Service:</strong> ${service.uuid}
-                        <div class="characteristics-list"></div>
-                    </div>
-                `;
-            }
-            servicesSection.innerHTML = servicesHtml;
+            servicesSection.replaceChildren();
+            const heading = document.createElement('h3');
+            heading.textContent = 'Services';
+            servicesSection.appendChild(heading);
 
-            const serviceCards = servicesSection.querySelectorAll('.service-card');
-            for (let i = 0; i < services.length; i++) {
-                discoverCharacteristics(services[i], serviceCards[i].querySelector('.characteristics-list'));
+            const serviceCards = [];
+            for (const service of services) {
+                const serviceCard = document.createElement('div');
+                serviceCard.className = 'service-card';
+                const label = document.createElement('strong');
+                label.textContent = 'Service:';
+                serviceCard.appendChild(label);
+                appendText(serviceCard, ` ${service.uuid}`);
+                const characteristicsList = document.createElement('div');
+                characteristicsList.className = 'characteristics-list';
+                serviceCard.appendChild(characteristicsList);
+                servicesSection.appendChild(serviceCard);
+                serviceCards.push({ service, characteristicsList });
+            }
+
+            for (const { service, characteristicsList } of serviceCards) {
+                discoverCharacteristics(service, characteristicsList);
             }
         } catch (error) {
-            servicesSection.innerHTML = `<div class="error">Failed to discover services: ${error.message}</div>`;
+            setStatus(servicesSection, 'error', `Failed to discover services: ${error.message}`);
         }
     }
 
     async function discoverCharacteristics(service, characteristicsList) {
-        characteristicsList.innerHTML = '<div class="loading">Discovering characteristics...</div>';
+        setStatus(characteristicsList, 'loading', 'Discovering characteristics...');
         try {
             const characteristics = await service.getCharacteristics();
-            let characteristicsHtml = '';
+            characteristicsList.replaceChildren();
             for (const characteristic of characteristics) {
-                characteristicsHtml += `
-                    <div class="characteristic-item">
-                        <div class="characteristic-info">
-                            <strong>Characteristic:</strong> ${characteristic.uuid}<br>
-                            Properties: ${Object.keys(characteristic.properties).filter(k => characteristic.properties[k]).join(', ')}
-                        </div>
-                        <div class="button-group">
-                            ${characteristic.properties.read ? '<button class="read-btn">Read</button>' : ''}
-                            ${characteristic.properties.write ? '<button class="write-btn">Write</button>' : ''}
-                            ${characteristic.properties.notify ? '<button class="subscribe-btn">Notify</button>' : ''}
-                        </div>
-                        <div class="characteristic-value" style="display: none;"></div>
-                    </div>
-                `;
-            }
-            characteristicsList.innerHTML = characteristicsHtml;
+                const item = document.createElement('div');
+                item.className = 'characteristic-item';
 
-            const charItems = characteristicsList.querySelectorAll('.characteristic-item');
-            for (let i = 0; i < characteristics.length; i++) {
-                const char = characteristics[i];
-                const item = charItems[i];
-                if (char.properties.read) {
-                    item.querySelector('.read-btn').addEventListener('click', () => readValue(char, item.querySelector('.characteristic-value')));
+                const info = document.createElement('div');
+                info.className = 'characteristic-info';
+                const label = document.createElement('strong');
+                label.textContent = 'Characteristic:';
+                info.appendChild(label);
+                appendText(info, ` ${characteristic.uuid}`);
+                info.appendChild(document.createElement('br'));
+                appendText(info, `Properties: ${Object.keys(characteristic.properties).filter(k => characteristic.properties[k]).join(', ')}`);
+
+                const buttonGroup = document.createElement('div');
+                buttonGroup.className = 'button-group';
+                const valueDiv = document.createElement('div');
+                valueDiv.className = 'characteristic-value';
+                valueDiv.style.display = 'none';
+
+                if (characteristic.properties.read) {
+                    const readButton = document.createElement('button');
+                    readButton.className = 'read-btn';
+                    readButton.textContent = 'Read';
+                    readButton.addEventListener('click', () => readValue(characteristic, valueDiv));
+                    buttonGroup.appendChild(readButton);
                 }
-                 if (char.properties.notify) {
-                    item.querySelector('.subscribe-btn').addEventListener('click', (event) => toggleNotifications(char, event.target));
+                if (characteristic.properties.write) {
+                    const writeButton = document.createElement('button');
+                    writeButton.className = 'write-btn';
+                    writeButton.textContent = 'Write';
+                    buttonGroup.appendChild(writeButton);
                 }
+                if (characteristic.properties.notify) {
+                    const notifyButton = document.createElement('button');
+                    notifyButton.className = 'subscribe-btn';
+                    notifyButton.textContent = 'Notify';
+                    notifyButton.addEventListener('click', (event) => toggleNotifications(characteristic, event.target));
+                    buttonGroup.appendChild(notifyButton);
+                }
+
+                item.append(info, buttonGroup, valueDiv);
+                characteristicsList.appendChild(item);
+            }
+
+            if (characteristics.length === 0) {
+                setStatus(characteristicsList, 'loading', 'No characteristics found.');
             }
         } catch (error) {
-            characteristicsList.innerHTML = `<div class="error">Failed to discover characteristics: ${error.message}</div>`;
+            setStatus(characteristicsList, 'error', `Failed to discover characteristics: ${error.message}`);
         }
     }
 
@@ -187,8 +245,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const valueStr = decoder.decode(value);
         console.log(`Notification: ${valueStr}`);
 
+        const rawId = event.target.service.device.id;
+        const safeId = typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(rawId) : rawId.replace(/"/g, '\\"');
         const valueDiv = event.target.service.device.gatt.connected ?
-            document.querySelector(`#device-${event.target.service.device.id} #value-${event.target.uuid}`) : null;
+            document.querySelector(`#device-${safeId} #value-${event.target.uuid}`) : null;
 
         if (valueDiv) {
             valueDiv.textContent = `Notification: ${valueStr}`;

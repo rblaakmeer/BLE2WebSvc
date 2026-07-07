@@ -368,7 +368,7 @@
         <div class="content">
             <div class="section">
                 <h2>Discovered Devices</h2>
-                <button class="refresh-btn" onclick="refreshDevices()">🔄 Refresh Devices</button>
+                <button class="refresh-btn" id="refresh-btn">Refresh Devices</button>
                 <label style="margin-left: 12px; font-size: 0.95rem; color: #333;">
                     <input type="checkbox" id="toggle-unknown" style="margin-right: 6px;">
                     Show unknown devices
@@ -384,10 +384,10 @@
         let devices = [];
         let connectedDevices = new Set();
         let showUnknownDevices = false;
+        const activeSubscriptions = new Map();
+        const pollingIntervals = new Map();
 
-        // Initialize the page
         document.addEventListener('DOMContentLoaded', function() {
-            // Load preference from localStorage
             try {
                 const saved = localStorage.getItem('showUnknownDevices');
                 showUnknownDevices = saved ? JSON.parse(saved) : false;
@@ -395,14 +395,17 @@
                 showUnknownDevices = false;
             }
 
-            // Initialize checkbox and handler
+            const refreshButton = document.getElementById('refresh-btn');
+            if (refreshButton) {
+                refreshButton.addEventListener('click', refreshDevices);
+            }
+
             const toggle = document.getElementById('toggle-unknown');
             if (toggle) {
                 toggle.checked = showUnknownDevices;
                 toggle.addEventListener('change', (e) => {
                     showUnknownDevices = !!e.target.checked;
                     try { localStorage.setItem('showUnknownDevices', JSON.stringify(showUnknownDevices)); } catch (e) {}
-                    // Re-render current list using new filter
                     displayDevices();
                 });
             }
@@ -410,139 +413,191 @@
             refreshDevices();
         });
 
-        // Refresh the list of discovered devices
+        function text(value, fallback = '') {
+            return value === undefined || value === null || value === '' ? fallback : String(value);
+        }
+
+        function generatedId(prefix, ...parts) {
+            return `${prefix}-${parts.map(part => encodeURIComponent(String(part))).join('-')}`;
+        }
+
+        function apiPart(value) {
+            return encodeURIComponent(String(value));
+        }
+
+        function setMessage(container, className, message) {
+            container.replaceChildren();
+            const node = document.createElement('div');
+            node.className = className;
+            node.textContent = message;
+            container.appendChild(node);
+        }
+
+        function appendText(parent, value) {
+            parent.appendChild(document.createTextNode(value));
+        }
+
+        function appendLabeledLine(parent, label, value) {
+            const strong = document.createElement('strong');
+            strong.textContent = label;
+            parent.appendChild(strong);
+            appendText(parent, ` ${value}`);
+            parent.appendChild(document.createElement('br'));
+        }
+
+        function getDeviceCard(deviceId) {
+            return document.getElementById(generatedId('device', deviceId));
+        }
+
+        function getServicesSection(deviceId) {
+            return document.getElementById(generatedId('services', deviceId));
+        }
+
+        function getValueContainer(deviceId, characteristicUuid) {
+            return document.getElementById(generatedId('value', deviceId, characteristicUuid));
+        }
+
+        function getWriteSection(deviceId, characteristicUuid) {
+            return document.getElementById(generatedId('write', deviceId, characteristicUuid));
+        }
+
+        function getWriteInput(deviceId, characteristicUuid) {
+            return document.getElementById(generatedId('write-input', deviceId, characteristicUuid));
+        }
+
+        function errorFromResponse(response, errorData) {
+            return errorData && (errorData.error || errorData.details) ? (errorData.error || errorData.details) : `HTTP error! status: ${response.status}`;
+        }
+
+        async function parseErrorResponse(response) {
+            try {
+                return await response.json();
+            } catch (e) {
+                return {};
+            }
+        }
+
         async function refreshDevices() {
             const container = document.getElementById('devices-container');
-            container.innerHTML = '<div class="loading">Loading devices...</div>';
+            setMessage(container, 'loading', 'Loading devices...');
 
             try {
                 const response = await fetch('/ble/devices');
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
-                
+
                 devices = await response.json();
                 displayDevices();
             } catch (error) {
                 console.error('Error fetching devices:', error);
-                container.innerHTML = `<div class="error">Failed to load devices: ${error.message}</div>`;
+                setMessage(container, 'error', `Failed to load devices: ${error.message}`);
             }
         }
 
-        // Display the list of devices
         function displayDevices() {
             const container = document.getElementById('devices-container');
-            
-            // Apply filter based on toggle
             const list = showUnknownDevices ? devices : devices.filter(device => device.name && device.name.trim() !== '');
-            
+
             if (list.length === 0) {
                 if (devices.length === 0) {
-                    container.innerHTML = '<div class="loading">No devices discovered yet. Make sure Bluetooth is enabled and devices are advertising.</div>';
+                    setMessage(container, 'loading', 'No devices discovered yet. Make sure Bluetooth is enabled and devices are advertising.');
                 } else if (!showUnknownDevices) {
-                    container.innerHTML = '<div class="loading">No named devices found. Toggle "Show unknown devices" to include unnamed devices.</div>';
+                    setMessage(container, 'loading', 'No named devices found. Toggle "Show unknown devices" to include unnamed devices.');
                 } else {
-                    container.innerHTML = '<div class="loading">No devices to display.</div>';
+                    setMessage(container, 'loading', 'No devices to display.');
                 }
                 return;
             }
 
-            const devicesHtml = list.map(device => {
-                const isConnected = connectedDevices.has(device.id);
-                const statusClass = isConnected ? 'status-connected' : 'status-disconnected';
-                const statusText = isConnected ? 'Connected' : 'Disconnected';
-                
-                return `
-                    <div class="device-card" id="device-${device.id}">
-                        <div class="device-name">
-                            <span class="status-indicator ${statusClass}"></span>
-                            ${device.name || 'Unknown Device'}
-                        </div>
-                        <div class="device-info">
-                            <strong>ID:</strong> ${device.id}<br>
-                            <strong>Address:</strong> ${device.address || 'N/A'}<br>
-                            <strong>RSSI:</strong> ${device.rssi || 'N/A'} dBm<br>
-                            <strong>Status:</strong> ${statusText}
-                        </div>
-                        <button class="connect-btn" onclick="toggleConnection('${device.id}')" 
-                                ${isConnected ? '' : ''}>
-                            ${isConnected ? 'Disconnect' : 'Connect'}
-                        </button>
-                        <div id="services-${device.id}" class="services-section" style="display: ${isConnected ? 'block' : 'none'}">
-                            <!-- Services will be loaded here -->
-                        </div>
-                    </div>
-                `;
-            }).join('');
+            const grid = document.createElement('div');
+            grid.className = 'device-grid';
 
-            container.innerHTML = `<div class="device-grid">${devicesHtml}</div>`;
+            for (const device of list) {
+                const deviceId = text(device.id);
+                const isConnected = connectedDevices.has(deviceId);
+                const card = document.createElement('div');
+                card.className = 'device-card';
+                card.id = generatedId('device', deviceId);
+                card.dataset.deviceId = deviceId;
+
+                const name = document.createElement('div');
+                name.className = 'device-name';
+                const status = document.createElement('span');
+                status.className = `status-indicator ${isConnected ? 'status-connected' : 'status-disconnected'}`;
+                name.appendChild(status);
+                appendText(name, ` ${text(device.name, 'Unknown Device')}`);
+
+                const info = document.createElement('div');
+                info.className = 'device-info';
+                appendLabeledLine(info, 'ID:', deviceId);
+                appendLabeledLine(info, 'Address:', text(device.address, 'N/A'));
+                appendLabeledLine(info, 'RSSI:', `${text(device.rssi, 'N/A')} dBm`);
+                appendLabeledLine(info, 'Status:', isConnected ? 'Connected' : 'Disconnected');
+
+                const button = document.createElement('button');
+                button.className = 'connect-btn';
+                button.textContent = isConnected ? 'Disconnect' : 'Connect';
+                button.addEventListener('click', () => toggleConnection(deviceId));
+
+                const services = document.createElement('div');
+                services.id = generatedId('services', deviceId);
+                services.className = 'services-section';
+                services.style.display = isConnected ? 'block' : 'none';
+
+                card.append(name, info, button, services);
+                grid.appendChild(card);
+            }
+
+            container.replaceChildren(grid);
         }
 
-        // Toggle connection to a device
         async function toggleConnection(deviceId) {
-            const button = document.querySelector(`#device-${deviceId} .connect-btn`);
-            const statusIndicator = document.querySelector(`#device-${deviceId} .status-indicator`);
-            const servicesSection = document.getElementById(`services-${deviceId}`);
-            
+            const card = getDeviceCard(deviceId);
+            const button = card.querySelector('.connect-btn');
+            const statusIndicator = card.querySelector('.status-indicator');
+            const servicesSection = getServicesSection(deviceId);
             const isConnected = connectedDevices.has(deviceId);
-            
-            // Update UI to show connecting state
+
             button.disabled = true;
             statusIndicator.className = 'status-indicator status-connecting';
             button.textContent = isConnected ? 'Disconnecting...' : 'Connecting...';
 
             try {
                 if (isConnected) {
-                    // Disconnect
-                    const response = await fetch(`/ble/devices/${deviceId}/disconnect`, {
-                        method: 'POST'
-                    });
-                    
+                    const response = await fetch(`/ble/devices/${apiPart(deviceId)}/disconnect`, { method: 'POST' });
                     if (!response.ok) {
                         throw new Error(`HTTP error! status: ${response.status}`);
                     }
-                    
+
                     connectedDevices.delete(deviceId);
                     statusIndicator.className = 'status-indicator status-disconnected';
                     button.textContent = 'Connect';
                     servicesSection.style.display = 'none';
-                    servicesSection.innerHTML = '';
-                    
-                    // Clean up any active subscriptions for this device
+                    servicesSection.replaceChildren();
                     cleanupSubscriptionsForDevice(deviceId);
-                    
                 } else {
-                    // Connect
-                    const response = await fetch(`/ble/devices/${deviceId}/connect`, {
-                        method: 'POST'
-                    });
-                    
+                    const response = await fetch(`/ble/devices/${apiPart(deviceId)}/connect`, { method: 'POST' });
                     if (!response.ok) {
-                        const errorData = await response.json();
-                        throw new Error(errorData.details || `HTTP error! status: ${response.status}`);
+                        throw new Error(errorFromResponse(response, await parseErrorResponse(response)));
                     }
-                    
+
                     connectedDevices.add(deviceId);
                     statusIndicator.className = 'status-indicator status-connected';
                     button.textContent = 'Disconnect';
-                    
-                    // Load services and characteristics
                     await loadServicesAndCharacteristics(deviceId);
                     servicesSection.style.display = 'block';
                 }
-                
             } catch (error) {
                 console.error('Connection error:', error);
                 statusIndicator.className = 'status-indicator status-disconnected';
                 button.textContent = 'Connect';
-                
-                // Show error message
+
                 const errorDiv = document.createElement('div');
                 errorDiv.className = 'error';
                 errorDiv.textContent = `Connection failed: ${error.message}`;
-                document.querySelector(`#device-${deviceId}`).appendChild(errorDiv);
-                
-                // Remove error message after 5 seconds
+                card.appendChild(errorDiv);
+
                 setTimeout(() => {
                     if (errorDiv.parentNode) {
                         errorDiv.parentNode.removeChild(errorDiv);
@@ -553,159 +608,235 @@
             }
         }
 
-        // Load services and characteristics for a connected device
         async function loadServicesAndCharacteristics(deviceId) {
-            const servicesSection = document.getElementById(`services-${deviceId}`);
-            servicesSection.innerHTML = '<div class="loading">Loading services...</div>';
+            const servicesSection = getServicesSection(deviceId);
+            setMessage(servicesSection, 'loading', 'Loading services...');
 
             try {
-                // Get services
-                const servicesResponse = await fetch(`/ble/devices/${deviceId}/services`);
+                const servicesResponse = await fetch(`/ble/devices/${apiPart(deviceId)}/services`);
                 if (!servicesResponse.ok) {
                     throw new Error(`HTTP error! status: ${servicesResponse.status}`);
                 }
-                
+
                 const services = await servicesResponse.json();
-                
+                servicesSection.replaceChildren();
+
                 if (services.length === 0) {
-                    servicesSection.innerHTML = '<div class="loading">No services found.</div>';
+                    setMessage(servicesSection, 'loading', 'No services found.');
                     return;
                 }
 
-                let servicesHtml = '<h3>Services & Characteristics</h3>';
-                
+                const heading = document.createElement('h3');
+                heading.textContent = 'Services & Characteristics';
+                servicesSection.appendChild(heading);
+
                 for (const service of services) {
-                    servicesHtml += `
-                        <div class="service-card">
-                            <strong>Service:</strong> ${service.name || 'Unknown Service'}<br>
-                            <div class="service-uuid">UUID: ${service.uuid}</div>
-                            <div id="characteristics-${deviceId}-${service.uuid}" class="characteristics-list">
-                                <div class="loading">Loading characteristics...</div>
-                            </div>
-                        </div>
-                    `;
+                    const serviceUuid = text(service.uuid);
+                    const card = document.createElement('div');
+                    card.className = 'service-card';
+                    appendLabeledLine(card, 'Service:', text(service.name, 'Unknown Service'));
+
+                    const uuid = document.createElement('div');
+                    uuid.className = 'service-uuid';
+                    uuid.textContent = `UUID: ${serviceUuid}`;
+                    card.appendChild(uuid);
+
+                    const characteristics = document.createElement('div');
+                    characteristics.id = generatedId('characteristics', deviceId, serviceUuid);
+                    characteristics.className = 'characteristics-list';
+                    setMessage(characteristics, 'loading', 'Loading characteristics...');
+                    card.appendChild(characteristics);
+                    servicesSection.appendChild(card);
+
+                    await loadCharacteristics(deviceId, serviceUuid);
                 }
-                
-                servicesSection.innerHTML = servicesHtml;
-                
-                // Load characteristics for each service
-                for (const service of services) {
-                    await loadCharacteristics(deviceId, service.uuid);
-                }
-                
             } catch (error) {
                 console.error('Error loading services:', error);
-                servicesSection.innerHTML = `<div class="error">Failed to load services: ${error.message}</div>`;
+                setMessage(servicesSection, 'error', `Failed to load services: ${error.message}`);
             }
         }
 
-        // Load characteristics for a specific service
         async function loadCharacteristics(deviceId, serviceUuid) {
-            const characteristicsContainer = document.getElementById(`characteristics-${deviceId}-${serviceUuid}`);
-            
+            const characteristicsContainer = document.getElementById(generatedId('characteristics', deviceId, serviceUuid));
+
             try {
-                const response = await fetch(`/ble/devices/${deviceId}/services/${serviceUuid}/characteristics`);
+                const response = await fetch(`/ble/devices/${apiPart(deviceId)}/services/${apiPart(serviceUuid)}/characteristics`);
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
-                
+
                 const characteristics = await response.json();
-                
+                characteristicsContainer.replaceChildren();
+
                 if (characteristics.length === 0) {
-                    characteristicsContainer.innerHTML = '<div class="loading">No characteristics found.</div>';
+                    setMessage(characteristicsContainer, 'loading', 'No characteristics found.');
                     return;
                 }
 
-                const characteristicsHtml = characteristics.map(char => {
-                    const canRead = char.properties && char.properties.includes('read');
-                    const canWrite = char.properties && (char.properties.includes('write') || char.properties.includes('writeWithoutResponse'));
-                    const canNotify = char.properties && (char.properties.includes('notify') || char.properties.includes('indicate'));
-                    
-                    return `
-                        <div class="characteristic-item">
-                            <div class="characteristic-info">
-                                <strong>${char.name || 'Unknown Characteristic'}</strong><br>
-                                <div class="characteristic-uuid">UUID: ${char.uuid}</div>
-                                <div style="font-size: 0.8rem; color: #888; margin-top: 4px;">
-                                    Properties: ${char.properties ? char.properties.join(', ') : 'N/A'}
-                                </div>
-                            </div>
-                            <div class="button-group">
-                                ${canRead ? 
-                                    `<button class="read-btn" onclick="readCharacteristic('${deviceId}', '${char.uuid}')">Read</button>` : 
-                                    ''
-                                }
-                                ${canWrite ? 
-                                    `<button class="write-btn" onclick="toggleWriteSection('${deviceId}', '${char.uuid}')">Write</button>` : 
-                                    ''
-                                }
-                                ${canNotify ? 
-                                    `<button class="subscribe-btn" id="subscribe-btn-${deviceId}-${char.uuid}" onclick="toggleSubscription('${deviceId}', '${char.uuid}')">Subscribe</button>` : 
-                                    ''
-                                }
-                                ${!canRead && !canWrite && !canNotify ? 
-                                    '<span style="color: #ccc; font-size: 0.8rem; text-align: center;">No access</span>' : 
-                                    ''
-                                }
-                            </div>
-                        </div>
-                        <div id="value-${deviceId}-${char.uuid}" class="characteristic-value" style="display: none;"></div>
-                        <div id="write-${deviceId}-${char.uuid}" class="write-section" style="display: none;">
-                            <label for="write-input-${deviceId}-${char.uuid}">Enter hex value to write:</label>
-                            <input type="text" id="write-input-${deviceId}-${char.uuid}" class="write-input" 
-                                   placeholder="e.g., 48656c6c6f (hex string)" 
-                                   pattern="[0-9a-fA-F]*"
-                                   title="Enter a valid hex string (0-9, a-f, A-F)">
-                            <div style="margin-top: 8px;">
-                                <button class="write-btn" onclick="writeCharacteristic('${deviceId}', '${char.uuid}')">Send</button>
-                                <button class="read-btn" onclick="toggleWriteSection('${deviceId}', '${char.uuid}')">Cancel</button>
-                            </div>
-                            <div style="font-size: 0.8rem; color: #666; margin-top: 5px;">
-                                💡 Tip: Enter data as hex string (e.g., "48656c6c6f" for "Hello")
-                            </div>
-                        </div>
-                        <div id="notifications-${deviceId}-${char.uuid}" class="notifications-section" style="display: none;">
-                            <h4>Live Notifications</h4>
-                            <div id="notifications-list-${deviceId}-${char.uuid}"></div>
-                        </div>
-                    `;
-                }).join('');
+                for (const char of characteristics) {
+                    const characteristicUuid = text(char.uuid);
+                    const properties = Array.isArray(char.properties) ? char.properties : [];
+                    const canRead = properties.includes('read');
+                    const canWrite = properties.includes('write') || properties.includes('writeWithoutResponse');
+                    const canNotify = properties.includes('notify') || properties.includes('indicate');
 
-                characteristicsContainer.innerHTML = characteristicsHtml;
-                
+                    const item = document.createElement('div');
+                    item.className = 'characteristic-item';
+
+                    const info = document.createElement('div');
+                    info.className = 'characteristic-info';
+                    const name = document.createElement('strong');
+                    name.textContent = text(char.name, 'Unknown Characteristic');
+                    info.appendChild(name);
+                    info.appendChild(document.createElement('br'));
+
+                    const uuid = document.createElement('div');
+                    uuid.className = 'characteristic-uuid';
+                    uuid.textContent = `UUID: ${characteristicUuid}`;
+                    info.appendChild(uuid);
+
+                    const props = document.createElement('div');
+                    props.style.fontSize = '0.8rem';
+                    props.style.color = '#888';
+                    props.style.marginTop = '4px';
+                    props.textContent = `Properties: ${properties.length ? properties.join(', ') : 'N/A'}`;
+                    info.appendChild(props);
+
+                    const buttonGroup = document.createElement('div');
+                    buttonGroup.className = 'button-group';
+
+                    if (canRead) {
+                        const readButton = document.createElement('button');
+                        readButton.className = 'read-btn';
+                        readButton.textContent = 'Read';
+                        readButton.addEventListener('click', () => readCharacteristic(deviceId, characteristicUuid, readButton));
+                        buttonGroup.appendChild(readButton);
+                    }
+                    if (canWrite) {
+                        const writeButton = document.createElement('button');
+                        writeButton.className = 'write-btn';
+                        writeButton.textContent = 'Write';
+                        writeButton.addEventListener('click', () => toggleWriteSection(deviceId, characteristicUuid));
+                        buttonGroup.appendChild(writeButton);
+                    }
+                    if (canNotify) {
+                        const subscribeButton = document.createElement('button');
+                        subscribeButton.className = 'subscribe-btn';
+                        subscribeButton.id = generatedId('subscribe-btn', deviceId, characteristicUuid);
+                        subscribeButton.textContent = 'Subscribe';
+                        subscribeButton.addEventListener('click', () => toggleSubscription(deviceId, characteristicUuid));
+                        buttonGroup.appendChild(subscribeButton);
+                    }
+                    if (!canRead && !canWrite && !canNotify) {
+                        const noAccess = document.createElement('span');
+                        noAccess.style.color = '#ccc';
+                        noAccess.style.fontSize = '0.8rem';
+                        noAccess.style.textAlign = 'center';
+                        noAccess.textContent = 'No access';
+                        buttonGroup.appendChild(noAccess);
+                    }
+
+                    item.append(info, buttonGroup);
+                    characteristicsContainer.appendChild(item);
+                    characteristicsContainer.append(
+                        createValueContainer(deviceId, characteristicUuid),
+                        createWriteSection(deviceId, characteristicUuid),
+                        createNotificationsSection(deviceId, characteristicUuid)
+                    );
+                }
             } catch (error) {
                 console.error('Error loading characteristics:', error);
-                characteristicsContainer.innerHTML = `<div class="error">Failed to load characteristics: ${error.message}</div>`;
+                setMessage(characteristicsContainer, 'error', `Failed to load characteristics: ${error.message}`);
             }
         }
 
-        // Read a characteristic value
-        async function readCharacteristic(deviceId, characteristicUuid) {
-            const button = event.target;
-            const valueContainer = document.getElementById(`value-${deviceId}-${characteristicUuid}`);
-            
+        function createValueContainer(deviceId, characteristicUuid) {
+            const container = document.createElement('div');
+            container.id = generatedId('value', deviceId, characteristicUuid);
+            container.className = 'characteristic-value';
+            container.style.display = 'none';
+            return container;
+        }
+
+        function createWriteSection(deviceId, characteristicUuid) {
+            const section = document.createElement('div');
+            section.id = generatedId('write', deviceId, characteristicUuid);
+            section.className = 'write-section';
+            section.style.display = 'none';
+
+            const label = document.createElement('label');
+            label.setAttribute('for', generatedId('write-input', deviceId, characteristicUuid));
+            label.textContent = 'Enter hex value to write:';
+
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.id = generatedId('write-input', deviceId, characteristicUuid);
+            input.className = 'write-input';
+            input.placeholder = 'e.g., 48656c6c6f (hex string)';
+            input.pattern = '[0-9a-fA-F]*';
+            input.title = 'Enter a valid hex string (0-9, a-f, A-F)';
+
+            const actions = document.createElement('div');
+            actions.style.marginTop = '8px';
+
+            const send = document.createElement('button');
+            send.className = 'write-btn';
+            send.textContent = 'Send';
+            send.addEventListener('click', () => writeCharacteristic(deviceId, characteristicUuid, send));
+
+            const cancel = document.createElement('button');
+            cancel.className = 'read-btn';
+            cancel.textContent = 'Cancel';
+            cancel.addEventListener('click', () => toggleWriteSection(deviceId, characteristicUuid));
+
+            actions.append(send, cancel);
+
+            const tip = document.createElement('div');
+            tip.style.fontSize = '0.8rem';
+            tip.style.color = '#666';
+            tip.style.marginTop = '5px';
+            tip.textContent = 'Tip: Enter data as hex string (e.g., "48656c6c6f" for "Hello")';
+
+            section.append(label, input, actions, tip);
+            return section;
+        }
+
+        function createNotificationsSection(deviceId, characteristicUuid) {
+            const section = document.createElement('div');
+            section.id = generatedId('notifications', deviceId, characteristicUuid);
+            section.className = 'notifications-section';
+            section.style.display = 'none';
+
+            const heading = document.createElement('h4');
+            heading.textContent = 'Live Notifications';
+            const list = document.createElement('div');
+            list.id = generatedId('notifications-list', deviceId, characteristicUuid);
+
+            section.append(heading, list);
+            return section;
+        }
+
+        async function readCharacteristic(deviceId, characteristicUuid, button) {
+            const valueContainer = getValueContainer(deviceId, characteristicUuid);
             button.disabled = true;
             button.textContent = 'Reading...';
-            
+
             try {
-                const response = await fetch(`/ble/devices/${deviceId}/characteristics/${characteristicUuid}`);
+                const response = await fetch(`/ble/devices/${apiPart(deviceId)}/characteristics/${apiPart(characteristicUuid)}`);
                 if (!response.ok) {
-                    const errorData = await response.json();
-                    throw new Error(errorData.details || `HTTP error! status: ${response.status}`);
+                    throw new Error(errorFromResponse(response, await parseErrorResponse(response)));
                 }
-                
+
                 const data = await response.json();
-                
-                // Display the value
-                valueContainer.innerHTML = `
-                    <strong>Value:</strong> ${data.value || 'No data'}<br>
-                    <small>Last read: ${new Date().toLocaleTimeString()}</small>
-                `;
+                valueContainer.replaceChildren();
+                appendLabeledLine(valueContainer, 'Value:', text(data.value, 'No data'));
+                const lastRead = document.createElement('small');
+                lastRead.textContent = `Last read: ${new Date().toLocaleTimeString()}`;
+                valueContainer.appendChild(lastRead);
                 valueContainer.style.display = 'block';
-                
             } catch (error) {
                 console.error('Error reading characteristic:', error);
-                valueContainer.innerHTML = `<div class="error">Failed to read: ${error.message}</div>`;
+                setMessage(valueContainer, 'error', `Failed to read: ${error.message}`);
                 valueContainer.style.display = 'block';
             } finally {
                 button.disabled = false;
@@ -713,84 +844,70 @@
             }
         }
 
-        // Toggle write section visibility
         function toggleWriteSection(deviceId, characteristicUuid) {
-            const writeSection = document.getElementById(`write-${deviceId}-${characteristicUuid}`);
+            const writeSection = getWriteSection(deviceId, characteristicUuid);
             const isVisible = writeSection.style.display === 'block';
-            
             writeSection.style.display = isVisible ? 'none' : 'block';
-            
+
             if (!isVisible) {
-                // Focus on input when showing
-                const input = document.getElementById(`write-input-${deviceId}-${characteristicUuid}`);
+                const input = getWriteInput(deviceId, characteristicUuid);
                 setTimeout(() => input.focus(), 100);
             }
         }
 
-        // Write a value to a characteristic
-        async function writeCharacteristic(deviceId, characteristicUuid) {
-            const input = document.getElementById(`write-input-${deviceId}-${characteristicUuid}`);
-            const writeSection = document.getElementById(`write-${deviceId}-${characteristicUuid}`);
-            const valueContainer = document.getElementById(`value-${deviceId}-${characteristicUuid}`);
-            
+        async function writeCharacteristic(deviceId, characteristicUuid, button) {
+            const input = getWriteInput(deviceId, characteristicUuid);
+            const writeSection = getWriteSection(deviceId, characteristicUuid);
+            const valueContainer = getValueContainer(deviceId, characteristicUuid);
             const hexValue = input.value.trim();
-            
-            // Validate hex input
+
             if (!hexValue) {
                 alert('Please enter a hex value to write.');
                 return;
             }
-            
             if (!/^[0-9a-fA-F]*$/.test(hexValue)) {
                 alert('Invalid hex format. Please use only 0-9 and a-f characters.');
                 return;
             }
-            
             if (hexValue.length % 2 !== 0) {
                 alert('Hex string must have an even number of characters.');
                 return;
             }
-            
-            const button = event.target;
+
             button.disabled = true;
             button.textContent = 'Writing...';
-            
+
             try {
-                const response = await fetch(`/ble/devices/${deviceId}/characteristics/${characteristicUuid}`, {
+                const response = await fetch(`/ble/devices/${apiPart(deviceId)}/characteristics/${apiPart(characteristicUuid)}`, {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        value: hexValue,
-                        withoutResponse: false
-                    })
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ value: hexValue, withoutResponse: false })
                 });
-                
+
                 if (!response.ok) {
-                    const errorData = await response.json();
-                    throw new Error(errorData.details || `HTTP error! status: ${response.status}`);
+                    throw new Error(errorFromResponse(response, await parseErrorResponse(response)));
                 }
-                
-                const result = await response.json();
-                
-                // Show success message
-                valueContainer.innerHTML = `
-                    <div class="success">
-                        <strong>Write successful!</strong><br>
-                        Value written: ${hexValue}<br>
-                        <small>Written at: ${new Date().toLocaleTimeString()}</small>
-                    </div>
-                `;
+
+                valueContainer.replaceChildren();
+                const success = document.createElement('div');
+                success.className = 'success';
+                const title = document.createElement('strong');
+                title.textContent = 'Write successful!';
+                success.appendChild(title);
+                success.appendChild(document.createElement('br'));
+                appendText(success, `Value written: ${hexValue}`);
+                success.appendChild(document.createElement('br'));
+                const writtenAt = document.createElement('small');
+                writtenAt.textContent = `Written at: ${new Date().toLocaleTimeString()}`;
+                success.appendChild(writtenAt);
+                valueContainer.appendChild(success);
                 valueContainer.style.display = 'block';
-                
-                // Clear input and hide write section
+
                 input.value = '';
                 writeSection.style.display = 'none';
-                
             } catch (error) {
                 console.error('Error writing characteristic:', error);
-                valueContainer.innerHTML = `<div class="error">Failed to write: ${error.message}</div>`;
+                setMessage(valueContainer, 'error', `Failed to write: ${error.message}`);
                 valueContainer.style.display = 'block';
             } finally {
                 button.disabled = false;
@@ -798,113 +915,82 @@
             }
         }
 
-        // Store active subscriptions and polling intervals
-        const activeSubscriptions = new Map();
-        const pollingIntervals = new Map();
-
-        // Toggle subscription to a characteristic
         async function toggleSubscription(deviceId, characteristicUuid) {
-            const button = document.getElementById(`subscribe-btn-${deviceId}-${characteristicUuid}`);
-            const notificationsSection = document.getElementById(`notifications-${deviceId}-${characteristicUuid}`);
+            const button = document.getElementById(generatedId('subscribe-btn', deviceId, characteristicUuid));
+            const notificationsSection = document.getElementById(generatedId('notifications', deviceId, characteristicUuid));
             const subscriptionKey = `${deviceId}-${characteristicUuid}`;
-            
             const isSubscribed = activeSubscriptions.has(subscriptionKey);
-            
+
             button.disabled = true;
             button.textContent = isSubscribed ? 'Unsubscribing...' : 'Subscribing...';
-            
+
             try {
                 if (isSubscribed) {
-                    // Unsubscribe
-                    const response = await fetch(`/ble/devices/${deviceId}/characteristics/${characteristicUuid}/unsubscribe`, {
-                        method: 'POST'
-                    });
-                    
+                    const response = await fetch(`/ble/devices/${apiPart(deviceId)}/characteristics/${apiPart(characteristicUuid)}/unsubscribe`, { method: 'POST' });
                     if (!response.ok) {
-                        const errorData = await response.json();
-                        throw new Error(errorData.details || `HTTP error! status: ${response.status}`);
+                        throw new Error(errorFromResponse(response, await parseErrorResponse(response)));
                     }
-                    
-                    // Stop polling and clean up
+
                     const intervalId = pollingIntervals.get(subscriptionKey);
                     if (intervalId) {
                         clearInterval(intervalId);
                         pollingIntervals.delete(subscriptionKey);
                     }
-                    
+
                     activeSubscriptions.delete(subscriptionKey);
                     button.textContent = 'Subscribe';
                     button.classList.remove('subscribed');
                     notificationsSection.style.display = 'none';
-                    
                 } else {
-                    // Subscribe
-                    const response = await fetch(`/ble/devices/${deviceId}/characteristics/${characteristicUuid}/subscribe`, {
-                        method: 'POST'
-                    });
-                    
+                    const response = await fetch(`/ble/devices/${apiPart(deviceId)}/characteristics/${apiPart(characteristicUuid)}/subscribe`, { method: 'POST' });
                     if (!response.ok) {
-                        const errorData = await response.json();
-                        throw new Error(errorData.details || `HTTP error! status: ${response.status}`);
+                        throw new Error(errorFromResponse(response, await parseErrorResponse(response)));
                     }
-                    
-                    const result = await response.json();
-                    
+
                     activeSubscriptions.set(subscriptionKey, {
                         deviceId,
                         characteristicUuid,
                         subscribedAt: new Date().toISOString(),
                         lastNotificationTime: 0
                     });
-                    
+
                     button.textContent = 'Unsubscribe';
                     button.classList.add('subscribed');
                     notificationsSection.style.display = 'block';
-                    
-                    // Start polling for notifications
                     startNotificationPolling(deviceId, characteristicUuid);
                 }
-                
             } catch (error) {
                 console.error('Subscription error:', error);
-                
-                // Show error message
-                const valueContainer = document.getElementById(`value-${deviceId}-${characteristicUuid}`);
-                valueContainer.innerHTML = `<div class="error">Subscription failed: ${error.message}</div>`;
+                const valueContainer = getValueContainer(deviceId, characteristicUuid);
+                setMessage(valueContainer, 'error', `Subscription failed: ${error.message}`);
                 valueContainer.style.display = 'block';
-                
-                // Remove error message after 5 seconds
+
                 setTimeout(() => {
-                    if (valueContainer.innerHTML.includes('Subscription failed')) {
+                    if (valueContainer.textContent.includes('Subscription failed')) {
                         valueContainer.style.display = 'none';
                     }
                 }, 5000);
-                
             } finally {
                 button.disabled = false;
             }
         }
 
-        // Start polling for notifications from a subscribed characteristic
         function startNotificationPolling(deviceId, characteristicUuid) {
             const subscriptionKey = `${deviceId}-${characteristicUuid}`;
             const subscription = activeSubscriptions.get(subscriptionKey);
-            
             if (!subscription) return;
-            
-            // Poll every 1 second for new notifications
+
             const intervalId = setInterval(async () => {
                 try {
-                    const response = await fetch(`/ble/devices/${deviceId}/characteristics/${characteristicUuid}/notifications?since=${subscription.lastNotificationTime}&limit=50`);
-                    
+                    const response = await fetch(`/ble/devices/${apiPart(deviceId)}/characteristics/${apiPart(characteristicUuid)}/notifications?since=${subscription.lastNotificationTime}&limit=50`);
+
                     if (!response.ok) {
                         if (response.status === 404) {
-                            // Subscription no longer exists, stop polling
                             clearInterval(intervalId);
                             pollingIntervals.delete(subscriptionKey);
                             activeSubscriptions.delete(subscriptionKey);
-                            
-                            const button = document.getElementById(`subscribe-btn-${deviceId}-${characteristicUuid}`);
+
+                            const button = document.getElementById(generatedId('subscribe-btn', deviceId, characteristicUuid));
                             if (button) {
                                 button.textContent = 'Subscribe';
                                 button.classList.remove('subscribed');
@@ -913,62 +999,62 @@
                         }
                         throw new Error(`HTTP error! status: ${response.status}`);
                     }
-                    
+
                     const data = await response.json();
-                    
                     if (data.notifications && data.notifications.length > 0) {
                         displayNotifications(deviceId, characteristicUuid, data.notifications);
-                        
-                        // Update last notification time
                         const lastNotification = data.notifications[data.notifications.length - 1];
                         subscription.lastNotificationTime = new Date(lastNotification.receivedAt).getTime();
                     }
-                    
                 } catch (error) {
                     console.error('Error polling notifications:', error);
                 }
             }, 1000);
-            
+
             pollingIntervals.set(subscriptionKey, intervalId);
         }
 
-        // Display notifications in the UI
         function displayNotifications(deviceId, characteristicUuid, notifications) {
-            const notificationsList = document.getElementById(`notifications-list-${deviceId}-${characteristicUuid}`);
-            
+            const notificationsList = document.getElementById(generatedId('notifications-list', deviceId, characteristicUuid));
+
             notifications.forEach(notification => {
                 const notificationDiv = document.createElement('div');
                 notificationDiv.className = 'notification-item';
-                
+
                 const timestamp = new Date(notification.receivedAt).toLocaleTimeString();
                 const notificationType = notification.isNotification ? 'Notification' : 'Indication';
-                
-                notificationDiv.innerHTML = `
-                    <div><strong>${notificationType}</strong></div>
-                    <div class="notification-value">${notification.value || 'No data'}</div>
-                    <div class="notification-time">${timestamp}</div>
-                `;
-                
-                // Add to top of list
+
+                const type = document.createElement('div');
+                const strong = document.createElement('strong');
+                strong.textContent = notificationType;
+                type.appendChild(strong);
+
+                const value = document.createElement('div');
+                value.className = 'notification-value';
+                value.textContent = text(notification.value, 'No data');
+
+                const time = document.createElement('div');
+                time.className = 'notification-time';
+                time.textContent = timestamp;
+
+                notificationDiv.append(type, value, time);
                 notificationsList.insertBefore(notificationDiv, notificationsList.firstChild);
-                
-                // Keep only the last 20 notifications visible
+
                 while (notificationsList.children.length > 20) {
                     notificationsList.removeChild(notificationsList.lastChild);
                 }
             });
         }
 
-        // Clean up subscriptions when device disconnects
         function cleanupSubscriptionsForDevice(deviceId) {
             const keysToRemove = [];
-            
+
             activeSubscriptions.forEach((subscription, key) => {
                 if (subscription.deviceId === deviceId) {
                     keysToRemove.push(key);
                 }
             });
-            
+
             keysToRemove.forEach(key => {
                 const intervalId = pollingIntervals.get(key);
                 if (intervalId) {

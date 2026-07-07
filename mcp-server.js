@@ -2,6 +2,18 @@ const net = require('net');
 const bleManager = require('./ble-manager');
 const crypto = require('crypto');
 
+function timingSafeEqualString(provided, expected) {
+    if (typeof provided !== 'string' || typeof expected !== 'string') return false;
+    const providedHash = crypto.createHash('sha256').update(provided, 'utf8').digest();
+    const expectedHash = crypto.createHash('sha256').update(expected, 'utf8').digest();
+    return crypto.timingSafeEqual(providedHash, expectedHash);
+}
+
+function positiveIntegerFromEnv(name, fallback) {
+    const parsed = parseInt(process.env[name] || '', 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
 class MCPServer {
     constructor(port) {
         this.port = port || process.env.MCP_PORT || 8123;
@@ -9,6 +21,7 @@ class MCPServer {
         this.clients = new Set();
         this.subscriptions = new Map(); // socket -> Map<deviceId:charUuid, listener>
         this.authToken = process.env.MCP_TOKEN || null;
+        this.maxMessageBytes = positiveIntegerFromEnv('MCP_MAX_MESSAGE_BYTES', 64 * 1024);
 
         // Tool / execution management (MCP SDK)
         this.tools = new Map(); // toolId -> { meta, handler }
@@ -22,6 +35,7 @@ class MCPServer {
             callback = port;
             port = null;
         }
+        this._validateProductionSecurityConfig();
         this.port = port || this.port;
         this.server = net.createServer(socket => this._onConnection(socket));
         this.server.listen(this.port, () => {
@@ -55,6 +69,11 @@ class MCPServer {
         let buffer = '';
         socket.on('data', chunk => {
             buffer += chunk;
+            if (Buffer.byteLength(buffer, 'utf8') > this.maxMessageBytes) {
+                socket.write(JSON.stringify({ type: 'mcp/error', id: null, payload: { code: 'message_too_large' } }) + '\n');
+                socket.destroy();
+                return;
+            }
             let idx;
             while ((idx = buffer.indexOf('\n')) >= 0) {
                 const line = buffer.slice(0, idx).trim();
@@ -98,16 +117,7 @@ class MCPServer {
                 return;
             }
             const token = payload.token;
-            // Use timing-safe comparison to prevent timing attacks
-            let tokenMatch = false;
-            try {
-                if (token && typeof token === 'string' && token.length === this.authToken.length) {
-                    tokenMatch = crypto.timingSafeEqual(Buffer.from(token), Buffer.from(this.authToken));
-                }
-            } catch (err) {
-                // timingSafeEqual throws if lengths differ
-                tokenMatch = false;
-            }
+            const tokenMatch = timingSafeEqualString(token, this.authToken);
             if (!tokenMatch) {
                 socket.write(JSON.stringify({ type: 'mcp/error', id, payload: { code: 'invalid_token' } }) + '\n');
                 return;
@@ -349,6 +359,15 @@ class MCPServer {
         if (crypto && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
         this._execCounter += 1;
         return `${Date.now()}-${process.pid}-${this._execCounter}`;
+    }
+
+    _validateProductionSecurityConfig() {
+        if (process.env.NODE_ENV !== 'production' || process.env.ALLOW_INSECURE_PRODUCTION === 'true') {
+            return;
+        }
+        if (!this.authToken) {
+            throw new Error('Refusing to start MCP server in production without MCP_TOKEN.');
+        }
     }
 }
 

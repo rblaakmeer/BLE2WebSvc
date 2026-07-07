@@ -6,7 +6,7 @@ This document outlines the security improvements made to BLE2WebSvc and provides
 
 ### 1. Timing Attack Prevention ✓
 **Issue**: Token comparisons were vulnerable to timing attacks.
-**Fix**: Implemented `crypto.timingSafeEqual()` for secure token and API key verification.
+**Fix**: Hashes API keys and MCP tokens to fixed-length digests before using `crypto.timingSafeEqual()` for verification.
 
 **Files Modified**:
 - `mcp-server.js`: MCP token authentication
@@ -50,7 +50,7 @@ This document outlines the security improvements made to BLE2WebSvc and provides
 
 ### 6. Static File Serving Control ✓
 **Issue**: Static files could potentially expose sensitive information.
-**Fix**: Made static file serving optional and configurable.
+**Fix**: Made static file serving optional and configurable, including the legacy `/webble` page.
 
 **Configuration**:
 - Environment variable: `SERVE_STATIC` (default: enabled)
@@ -72,7 +72,7 @@ This document outlines the security improvements made to BLE2WebSvc and provides
   ```bash
   export MCP_TOKEN=$(openssl rand -hex 32)
   ```
-- [ ] Set `API_KEY` for REST API authentication (optional but recommended)
+- [ ] Set strong `API_KEY` for REST API authentication
   ```bash
   export API_KEY=$(openssl rand -hex 32)
   ```
@@ -98,10 +98,13 @@ This document outlines the security improvements made to BLE2WebSvc and provides
 **Authentication & Security**:
 ```bash
 MCP_TOKEN=<secure-random-token>              # Required for MCP authentication
-API_KEY=<secure-random-key>                  # Optional for REST API authentication
+API_KEY=<secure-random-key>                  # Required in production for REST API authentication
 CORS_ORIGIN=https://example.com              # Restrict to specific origin(s)
 SERVE_STATIC=false                           # Disable if not needed
+ALLOW_INSECURE_PRODUCTION=true               # Only for trusted isolated deployments without auth secrets
 ```
+
+When `NODE_ENV=production`, BLE2WebSvc refuses to start unless `MCP_TOKEN` and `API_KEY` are set. The `systemd-service.sh` installer creates `/etc/ble2websvc.env` with generated secrets and loads it through `EnvironmentFile`.
 
 **Server Configuration**:
 ```bash
@@ -212,7 +215,9 @@ npm update
 const crypto = require('crypto');
 const token1 = "secret123";
 const token2 = "secret456";
-crypto.timingSafeEqual(Buffer.from(token1), Buffer.from(token2)); // false
+const digest1 = crypto.createHash('sha256').update(token1, 'utf8').digest();
+const digest2 = crypto.createHash('sha256').update(token2, 'utf8').digest();
+crypto.timingSafeEqual(digest1, digest2); // false
 ```
 
 ### Test Input Validation

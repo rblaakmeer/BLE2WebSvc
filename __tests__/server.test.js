@@ -244,4 +244,49 @@ describe('BLE API Endpoints', () => {
     });
   });
 
+  describe('POST /ble/devices/:deviceId/characteristics/:characteristicUuid', () => {
+    const deviceId = 'test-device-id';
+    const characteristicUuid = '2a37';
+
+    it('should reject non-string write values before reaching BLE manager', async () => {
+      const response = await request(app)
+        .post(`/ble/devices/${deviceId}/characteristics/${characteristicUuid}`)
+        .send({ value: { nested: 'not-hex' } });
+
+      expect(response.status).toBe(400);
+      expect(response.body).toEqual({
+        error: 'Invalid request. Please provide a valid hex string.'
+      });
+      expect(bleManager.writeCharacteristic).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('production security configuration', () => {
+    const originalEnv = { ...process.env };
+
+    afterEach(() => {
+      process.env = { ...originalEnv };
+    });
+
+    it('should refuse production startup without REST and MCP secrets', () => {
+      process.env = { ...originalEnv, NODE_ENV: 'production' };
+      delete process.env.API_KEY;
+      delete process.env.MCP_TOKEN;
+      delete process.env.ALLOW_INSECURE_PRODUCTION;
+
+      expect(() => app.validateProductionSecurityConfig()).toThrow(/API_KEY and MCP_TOKEN/);
+    });
+
+    it('should allow production startup when REST and MCP secrets are configured', () => {
+      process.env = {
+        ...originalEnv,
+        NODE_ENV: 'production',
+        API_KEY: 'rest-secret',
+        MCP_TOKEN: 'mcp-secret'
+      };
+
+      expect(() => app.validateProductionSecurityConfig()).not.toThrow();
+    });
+  });
+
 });

@@ -8,6 +8,7 @@ echo "Creating systemd service for BLE2WebSvc..."
 CURRENT_USER=$(whoami)
 CURRENT_DIR=$(pwd)
 NODE_PATH=$(which node)
+ENV_FILE="/etc/ble2websvc.env"
 
 if [ -z "$NODE_PATH" ]; then
     echo "Error: Node.js not found. Please install Node.js first."
@@ -20,6 +21,14 @@ if [ ! -f "server.js" ] || [ ! -f "package.json" ]; then
     echo "Make sure server.js and package.json exist in the current directory"
     exit 1
 fi
+
+generate_secret() {
+    if command -v openssl >/dev/null 2>&1; then
+        openssl rand -hex 32
+    else
+        head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n'
+    fi
+}
 
 # Create the service file content
 SERVICE_CONTENT="[Unit]
@@ -38,6 +47,7 @@ Restart=always
 RestartSec=10
 Environment=NODE_ENV=production
 Environment=PORT=8111
+EnvironmentFile=$ENV_FILE
 
 # Bluetooth capabilities
 AmbientCapabilities=CAP_NET_RAW CAP_NET_ADMIN
@@ -51,6 +61,17 @@ if [[ $EUID -ne 0 ]]; then
     echo "This script needs to create a system service file."
     echo "Please run with sudo: sudo ./systemd-service.sh"
     exit 1
+fi
+
+if [ ! -f "$ENV_FILE" ]; then
+    echo "Creating security environment file at $ENV_FILE..."
+    cat > "$ENV_FILE" << EOF
+API_KEY=$(generate_secret)
+MCP_TOKEN=$(generate_secret)
+EOF
+    chmod 600 "$ENV_FILE"
+else
+    echo "Using existing security environment file at $ENV_FILE"
 fi
 
 # Write the service file
@@ -81,3 +102,4 @@ echo "  Disable service:  sudo systemctl disable ble2websvc"
 echo ""
 echo "The service will start automatically on boot."
 echo "To start it now, run: sudo systemctl start ble2websvc"
+echo "API_KEY and MCP_TOKEN are stored in $ENV_FILE"

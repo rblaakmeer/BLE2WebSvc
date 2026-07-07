@@ -14,7 +14,7 @@ This fork implements an MCP (Model Context Protocol) server compatible with the 
 
 ## Requirements
 
-- Node.js (16+ recommended)
+- Node.js (18+ required)
 - Linux (Raspberry Pi OS recommended for Pi Zero W)
 - BLE-capable hardware
 
@@ -35,6 +35,8 @@ For production deployments, please review [SECURITY_HARDENING.md](./SECURITY_HAR
 - [ ] Set `NODE_ENV=production`
 - [ ] Review and apply the [Security Hardening Guide](./SECURITY_HARDENING.md)
 
+When `NODE_ENV=production`, the service refuses to start unless both `MCP_TOKEN` and `API_KEY` are set. The systemd installer creates `/etc/ble2websvc.env` with generated secrets for production service deployments.
+
 ## Local development and testing
 
 Run the HTTP API and web UI locally, and optionally protect BLE endpoints with an API key.
@@ -50,6 +52,7 @@ npm install
 - `CORS_ORIGIN` – Allowed origin for CORS (default: `*`)
 - `RATE_LIMIT_WINDOW_MS` – Rate limit window in ms (default: `60000`)
 - `RATE_LIMIT_MAX` – Max requests per window per IP for `/ble` (default: `120`)
+- `ALLOW_INSECURE_PRODUCTION` – Set to `true` only for a trusted isolated deployment if you intentionally need production mode without authentication secrets
 
 Windows (PowerShell):
 ```powershell

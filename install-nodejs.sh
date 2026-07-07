@@ -25,18 +25,18 @@ if ! command -v curl >/dev/null 2>&1; then
     sudo apt install -y curl
 fi
 
-# Install Node.js v16.16.0 using NodeSource repository
-echo "Adding NodeSource repository for Node.js v16..."
-curl -fsSL https://deb.nodesource.com/setup_16.x | sudo -E bash -
+# Install a supported Node.js LTS line using the NodeSource repository
+echo "Adding NodeSource repository for Node.js v22..."
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
 
-echo "Installing Node.js v16..."
+echo "Installing Node.js v22..."
 sudo apt-get install -y nodejs
 
 # Verify we have the correct version
 INSTALLED_VERSION=$(node --version)
 echo "Installed Node.js version: $INSTALLED_VERSION"
-if [[ "$INSTALLED_VERSION" != v16.* ]]; then
-    echo "Warning: Expected Node.js v16.x.x but got $INSTALLED_VERSION"
+if [[ "$INSTALLED_VERSION" != v22.* ]]; then
+    echo "Warning: Expected Node.js v22.x.x but got $INSTALLED_VERSION"
     echo "This may cause compatibility issues with BLE2WebSvc"
 fi
 

@@ -25,6 +25,14 @@ const SecurityHelpers = {
     if (typeof deviceId !== 'string') return false;
     return /^[a-zA-Z0-9_:-]+$/.test(deviceId) && deviceId.length > 0 && deviceId.length <= 255;
   },
+
+  // Compare secrets after hashing to avoid leaking useful length or prefix timing.
+  timingSafeEqualString: (provided, expected) => {
+    if (typeof provided !== 'string' || typeof expected !== 'string') return false;
+    const providedHash = crypto.createHash('sha256').update(provided, 'utf8').digest();
+    const expectedHash = crypto.createHash('sha256').update(expected, 'utf8').digest();
+    return crypto.timingSafeEqual(providedHash, expectedHash);
+  },
   
   // Map error messages to safe error responses for clients
   getSafeErrorMessage: (errorMessage, statusCode = 500) => {
@@ -98,20 +106,29 @@ app.use(globalLimiter);
 
 // API key auth for BLE routes (no-op if API_KEY is not set)
 const requiredApiKey = process.env.API_KEY || null;
+function validateProductionSecurityConfig() {
+  if (process.env.NODE_ENV !== 'production' || process.env.ALLOW_INSECURE_PRODUCTION === 'true') {
+    return;
+  }
+
+  const missing = [];
+  if (!process.env.API_KEY) missing.push('API_KEY');
+  if (!process.env.MCP_TOKEN) missing.push('MCP_TOKEN');
+
+  if (missing.length > 0) {
+    throw new Error(
+      `Refusing to start in production without ${missing.join(' and ')}. ` +
+      'Set strong secrets, or set ALLOW_INSECURE_PRODUCTION=true only for a trusted isolated deployment.'
+    );
+  }
+}
+
 app.use('/ble', (req, res, next) => {
   if (!requiredApiKey) {
     return next();
   }
   const provided = req.get('x-api-key') || req.query.api_key;
-  // Use timing-safe comparison to prevent timing attacks
-  let keyMatch = false;
-  try {
-    if (provided && typeof provided === 'string' && provided.length === requiredApiKey.length) {
-      keyMatch = crypto.timingSafeEqual(Buffer.from(provided), Buffer.from(requiredApiKey));
-    }
-  } catch (err) {
-    keyMatch = false;
-  }
+  const keyMatch = SecurityHelpers.timingSafeEqualString(provided, requiredApiKey);
   if (!keyMatch) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
@@ -129,14 +146,17 @@ if (process.env.SERVE_STATIC !== 'false') {
     }
   }));
   app.use('/web', express.static('public'));
+  app.get('/webble', (req, res) => {
+    res.sendFile(__dirname + '/public/webble.html');
+  });
 } else {
   app.use('/web', (req, res) => {
     res.status(403).json({ error: 'Static file serving is disabled' });
   });
+  app.get('/webble', (req, res) => {
+    res.status(403).json({ error: 'Static file serving is disabled' });
+  });
 }
-app.get('/webble', (req, res) => {
-  res.sendFile(__dirname + '/public/webble.html');
-});
 
 // Simple health endpoint (no auth)
 app.get('/health', (req, res) => {
@@ -336,12 +356,8 @@ app.post('/ble/devices/:deviceId/characteristics/:characteristicUuid', async (re
     return res.status(400).json({ error: 'Invalid request. Please provide a hex string value.' });
   }
   // Basic validation for hex string format.
-  if (typeof value !== 'string' || !/^[0-9a-fA-F]*$/.test(value) || value.length % 2 !== 0) {
-      // Allow empty string for some characteristics, but still must be even length if not empty.
-      // Corrected regex to allow empty string, but still check for even length if not empty.
-      if (value.length > 0 && (value.length % 2 !== 0 || !/^[0-9a-fA-F]+$/.test(value))) {
-        return res.status(400).json({ error: 'Invalid request. Please provide a valid hex string.' });
-      }
+  if (typeof value !== 'string' || value.length % 2 !== 0 || !/^[0-9a-fA-F]*$/.test(value)) {
+    return res.status(400).json({ error: 'Invalid request. Please provide a valid hex string.' });
   }
 
   try {
@@ -553,10 +569,12 @@ app.get('/ble/subscriptions', (req, res) => {
 });
 
 // Export the app instance for testing or other module usage
+app.validateProductionSecurityConfig = validateProductionSecurityConfig;
 module.exports = app;
 
 // Start the server only if this script is executed directly
 if (require.main === module) {
+  validateProductionSecurityConfig();
   const port = process.env.PORT || 8111; // Use environment variable for port if available, default to 8111
   const server = app.listen(port, () => { // 'server' var is now local to this block
     console.log(`BLE2WebSvc server listening on port ${port}`);
