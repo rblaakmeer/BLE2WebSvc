@@ -1,0 +1,4 @@
+flowchart LR
+  A["Nearby BLE advertiser"] --> N["noble discover event"]
+  N --> C["Global discoveredPeripherals array\nno expiry or cap"]
+  C --> API["HTTP / MCP enumeration and connect"]

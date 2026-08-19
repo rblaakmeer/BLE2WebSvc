@@ -14,14 +14,33 @@ function positiveIntegerFromEnv(name, fallback) {
     return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+function isLoopbackHost(host) {
+    const normalized = String(host || '').trim().toLowerCase();
+    return normalized === '127.0.0.1' || normalized === '::1' || normalized === 'localhost';
+}
+
+function loopbackHostFromEnv(name, fallback) {
+    const host = process.env[name] || fallback;
+    if (!isLoopbackHost(host)) {
+        throw new Error(`Refusing to bind MCP outside loopback via ${name}. Expose it through a TLS-terminating proxy or tunnel.`);
+    }
+    return host;
+}
+
 class MCPServer {
     constructor(port) {
         this.port = port || process.env.MCP_PORT || 8123;
+        this.host = loopbackHostFromEnv('MCP_HOST', process.env.HOST || '127.0.0.1');
         this.server = null;
         this.clients = new Set();
+        this.unauthenticatedClients = new Set();
         this.subscriptions = new Map(); // socket -> Map<deviceId:charUuid, listener>
         this.authToken = process.env.MCP_TOKEN || null;
         this.maxMessageBytes = positiveIntegerFromEnv('MCP_MAX_MESSAGE_BYTES', 64 * 1024);
+        this.maxClients = positiveIntegerFromEnv('MCP_MAX_CLIENTS', 100);
+        this.maxUnauthenticatedClients = positiveIntegerFromEnv('MCP_MAX_UNAUTHENTICATED_CLIENTS', 20);
+        this.handshakeTimeoutMs = positiveIntegerFromEnv('MCP_HANDSHAKE_TIMEOUT_MS', 10 * 1000);
+        this.idleTimeoutMs = positiveIntegerFromEnv('MCP_IDLE_TIMEOUT_MS', 5 * 60 * 1000);
 
         // Tool / execution management (MCP SDK)
         this.tools = new Map(); // toolId -> { meta, handler }
@@ -30,16 +49,26 @@ class MCPServer {
         this._execCounter = 0;
     }
 
-    start(port, callback) {
+    start(port, host, callback) {
         if (typeof port === 'function') {
             callback = port;
             port = null;
         }
+        if (typeof host === 'function') {
+            callback = host;
+            host = null;
+        }
         this._validateProductionSecurityConfig();
-        this.port = port || this.port;
+        this.port = port === null || typeof port === 'undefined' ? this.port : port;
+        if (host) {
+            if (!isLoopbackHost(host)) {
+                throw new Error('Refusing to bind MCP outside loopback. Expose it through a TLS-terminating proxy or tunnel.');
+            }
+            this.host = host;
+        }
         this.server = net.createServer(socket => this._onConnection(socket));
-        this.server.listen(this.port, () => {
-            console.log(`MCP server listening on ${this.port}`);
+        this.server.listen(this.port, this.host, () => {
+            console.log(`MCP server listening on ${this.host}:${this.port}`);
             if (callback) {
                 callback();
             }
@@ -49,6 +78,7 @@ class MCPServer {
 
     stop(callback) {
         for (const c of this.clients) c.destroy();
+        this.unauthenticatedClients.clear();
         if (this.server) this.server.close(callback);
     }
 
@@ -61,8 +91,23 @@ class MCPServer {
 
     _onConnection(socket) {
         socket.setEncoding('utf8');
+        if (this.clients.size >= this.maxClients) {
+            socket.end(JSON.stringify({ type: 'mcp/error', id: null, payload: { code: 'server_busy' } }) + '\n');
+            return;
+        }
+        if (this.authToken && this.unauthenticatedClients.size >= this.maxUnauthenticatedClients) {
+            socket.end(JSON.stringify({ type: 'mcp/error', id: null, payload: { code: 'too_many_unauthenticated_clients' } }) + '\n');
+            return;
+        }
         this.clients.add(socket);
         this.subscriptions.set(socket, new Map());
+        if (this.authToken) {
+            this.unauthenticatedClients.add(socket);
+            socket._mcpHandshakeTimer = setTimeout(() => {
+                if (!socket._mcpAuthenticated) socket.destroy();
+            }, this.handshakeTimeoutMs);
+        }
+        socket.setTimeout(this.idleTimeoutMs, () => socket.destroy());
 
         socket.write(JSON.stringify({ type: 'mcp/handshake', id: null, payload: { server: 'BLE2WebSvc MCP', version: '1.0' } }) + '\n');
 
@@ -83,15 +128,19 @@ class MCPServer {
         });
 
         socket.on('close', () => {
+            if (socket._mcpHandshakeTimer) clearTimeout(socket._mcpHandshakeTimer);
             this._cleanSubscriptions(socket);
             this.subscriptions.delete(socket);
             this.clients.delete(socket);
+            this.unauthenticatedClients.delete(socket);
             for (const subs of this.execSubscribers.values()) subs.delete(socket);
         });
 
         socket.on('error', () => {
+            if (socket._mcpHandshakeTimer) clearTimeout(socket._mcpHandshakeTimer);
             this._cleanSubscriptions(socket);
             this.clients.delete(socket);
+            this.unauthenticatedClients.delete(socket);
             for (const subs of this.execSubscribers.values()) subs.delete(socket);
         });
     }
@@ -123,6 +172,11 @@ class MCPServer {
                 return;
             }
             socket._mcpAuthenticated = true;
+            this.unauthenticatedClients.delete(socket);
+            if (socket._mcpHandshakeTimer) {
+                clearTimeout(socket._mcpHandshakeTimer);
+                socket._mcpHandshakeTimer = null;
+            }
             socket.write(JSON.stringify({ type: 'mcp/auth.ok', id, payload: { msg: 'authenticated' } }) + '\n');
             return;
         }
@@ -371,4 +425,6 @@ class MCPServer {
     }
 }
 
-module.exports = new MCPServer();
+const mcpServer = new MCPServer();
+module.exports = mcpServer;
+module.exports.MCPServer = MCPServer;

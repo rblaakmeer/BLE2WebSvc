@@ -1,0 +1,5 @@
+flowchart LR
+  A["Network client"] --> H["HTTP listener"]
+  A --> M["Raw MCP TCP listener"]
+  H --> B["BLE manager"]
+  M --> B

@@ -10,7 +10,7 @@ This fork implements an MCP (Model Context Protocol) server compatible with the 
 - BLE device discovery, connect, services, characteristics, read/write, subscribe
 - Tool Discovery and Tool Execution (MCP SDK style)
 - Execution event streaming (progress/completed/failed/cancelled)
-- Optional token authentication via `MCP_TOKEN`
+- Loopback-only HTTP and MCP listeners; remote access requires a TLS proxy or tunnel
 
 ## Requirements
 
@@ -32,6 +32,7 @@ For production deployments, please review [SECURITY_HARDENING.md](./SECURITY_HAR
 - [ ] Set `CORS_ORIGIN` to your frontend domain
 - [ ] Enable `API_KEY` for REST API access
 - [ ] Use HTTPS with a reverse proxy (nginx, Apache)
+- [ ] Keep the application listeners on loopback and expose only the TLS proxy or tunnel
 - [ ] Set `NODE_ENV=production`
 - [ ] Review and apply the [Security Hardening Guide](./SECURITY_HARDENING.md)
 
@@ -39,7 +40,8 @@ When `NODE_ENV=production`, the service refuses to start unless both `MCP_TOKEN`
 
 ## Local development and testing
 
-Run the HTTP API and web UI locally, and optionally protect BLE endpoints with an API key.
+Run the HTTP API and web UI locally. The application binds to loopback only; use
+a TLS-terminating proxy or tunnel for any supported remote access.
 
 ### 1) Install dependencies
 ```bash
@@ -48,7 +50,15 @@ npm install
 
 ### 2) Configure environment (optional)
 - `PORT` – HTTP server port (default: 8111)
-- `API_KEY` – If set, required on all `/ble/*` endpoints via header `x-api-key` or query `?api_key=`
+- `API_KEY` – Required for production startup; when set, required on all `/ble/*` endpoints via header `x-api-key`
+- `HOST` – HTTP bind host; must be `127.0.0.1`, `::1`, or `localhost` (default: `127.0.0.1`)
+- `MCP_HOST` – MCP bind host; must be loopback (defaults to `HOST`)
+- `MCP_MAX_CLIENTS` – Maximum concurrent MCP clients (default: `100`)
+- `MCP_MAX_UNAUTHENTICATED_CLIENTS` – Maximum clients awaiting MCP authentication (default: `20`)
+- `MCP_HANDSHAKE_TIMEOUT_MS` – Authentication deadline for MCP clients (default: `10000`)
+- `MCP_IDLE_TIMEOUT_MS` – Idle MCP socket timeout (default: `300000`)
+- `BLE_DISCOVERY_MAX_ENTRIES` – Maximum retained discovered peripherals (default: `256`)
+- `BLE_DISCOVERY_TTL_MS` – Expiry for disconnected discovery entries (default: `900000`)
 - `CORS_ORIGIN` – Allowed origin for CORS (default: `*`)
 - `RATE_LIMIT_WINDOW_MS` – Rate limit window in ms (default: `60000`)
 - `RATE_LIMIT_MAX` – Max requests per window per IP for `/ble` (default: `120`)
@@ -80,7 +90,8 @@ The server listens on `http://localhost:8111` by default. Health check: `GET /he
 Visit `http://localhost:8111/web` in your browser. Use the UI to discover, connect, read/write, and subscribe.
 
 ### 5) Call the API directly
-If `API_KEY` is set, include it in `x-api-key` header (or `?api_key=` query).
+If `API_KEY` is set, include it in the `x-api-key` header. URL query credentials
+are rejected so they are not retained in browser history or request logs.
 
 PowerShell examples:
 ```powershell
@@ -128,7 +139,8 @@ curl -sS -X POST "$API/ble/devices/$DEVICE_ID/characteristics/<char_uuid>/unsubs
 
 ## Starting the MCP Server
 
-Set optional environment variables and start the Node server:
+Set loopback-only MCP environment variables and start the Node server. For remote
+clients, use a TLS or mTLS tunnel that forwards to this local port.
 
 Windows (PowerShell):
 ```powershell
@@ -144,7 +156,7 @@ export MCP_TOKEN=secret   # optional
 npm start
 ```
 
-By default the MCP server listens on the port set in `MCP_PORT` or 8123.
+By default the MCP server listens on `127.0.0.1` at the port set in `MCP_PORT` or 8123.
 
 A single JSON object per line is expected. The server sends a handshake on connection:
 ```json

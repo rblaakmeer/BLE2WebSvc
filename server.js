@@ -105,8 +105,27 @@ const globalLimiter = rateLimit({ windowMs, max: maxReqs * 2, standardHeaders: t
 app.use(globalLimiter);
 
 // API key auth for BLE routes (no-op if API_KEY is not set)
-const requiredApiKey = process.env.API_KEY || null;
+function getRequiredApiKey() {
+  return process.env.API_KEY || null;
+}
+
+function isLoopbackHost(host) {
+  const normalized = String(host || '').trim().toLowerCase();
+  return normalized === '127.0.0.1' || normalized === '::1' || normalized === 'localhost';
+}
+
+function getHttpHost() {
+  const host = process.env.HOST || '127.0.0.1';
+  if (!isLoopbackHost(host)) {
+    throw new Error(
+      'Refusing to bind the HTTP service outside loopback. Expose it through a TLS-terminating proxy or tunnel.'
+    );
+  }
+  return host;
+}
+
 function validateProductionSecurityConfig() {
+  getHttpHost();
   if (process.env.NODE_ENV !== 'production' || process.env.ALLOW_INSECURE_PRODUCTION === 'true') {
     return;
   }
@@ -124,10 +143,11 @@ function validateProductionSecurityConfig() {
 }
 
 app.use('/ble', (req, res, next) => {
+  const requiredApiKey = getRequiredApiKey();
   if (!requiredApiKey) {
     return next();
   }
-  const provided = req.get('x-api-key') || req.query.api_key;
+  const provided = req.get('x-api-key');
   const keyMatch = SecurityHelpers.timingSafeEqualString(provided, requiredApiKey);
   if (!keyMatch) {
     return res.status(401).json({ error: 'Unauthorized' });
@@ -570,20 +590,22 @@ app.get('/ble/subscriptions', (req, res) => {
 
 // Export the app instance for testing or other module usage
 app.validateProductionSecurityConfig = validateProductionSecurityConfig;
+app.getHttpHost = getHttpHost;
 module.exports = app;
 
 // Start the server only if this script is executed directly
 if (require.main === module) {
   validateProductionSecurityConfig();
   const port = process.env.PORT || 8111; // Use environment variable for port if available, default to 8111
-  const server = app.listen(port, () => { // 'server' var is now local to this block
+  const host = getHttpHost();
+  const server = app.listen(port, host, () => { // 'server' var is now local to this block
     console.log(`BLE2WebSvc server listening on port ${port}`);
     // Log security settings
     const corsMsg = process.env.CORS_ORIGIN ? `restricted to ${process.env.CORS_ORIGIN}` : 'development mode (localhost:3000)';
     const authMsg = process.env.MCP_TOKEN ? 'enabled' : 'disabled (MCP_TOKEN not set)';
-    const apiKeyMsg = process.env.API_KEY ? 'enabled' : 'disabled (API_KEY not set)';
+    const apiKeyMsg = getRequiredApiKey() ? 'enabled' : 'disabled (API_KEY not set)';
     console.log(`Security: CORS ${corsMsg}, MCP Auth ${authMsg}, API Key Auth ${apiKeyMsg}`);
   });
   const mcpPort = process.env.MCP_PORT || 8123;
-  mcpServer.start(mcpPort);
+  mcpServer.start(mcpPort, process.env.MCP_HOST || host);
 }

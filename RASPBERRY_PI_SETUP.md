@@ -99,7 +99,10 @@ npm start
 
 The server will start on port 8111. You can access it at:
 - Local: `http://localhost:8111`
-- Network: `http://[PI_IP_ADDRESS]:8111`
+
+The application intentionally binds its HTTP and MCP listeners to loopback.
+For access from another device, deploy a TLS-terminating reverse proxy or a
+mutually authenticated tunnel on the Pi and forward it to the local service.
 
 ## Running as a Service (Optional)
 
@@ -202,23 +205,15 @@ curl http://localhost:8111/ble/devices -v
 
 ## Network Access
 
-To access from other devices on your network:
-
-1. Find your Pi's IP address:
-   ```bash
-   hostname -I
-   ```
-
-2. Access from another device:
-   ```
-   http://[PI_IP_ADDRESS]:8111/ble/devices
-   ```
+Do not expose ports 8111 or 8123 directly. Keep the application on loopback and
+publish a TLS-protected reverse proxy or authenticated tunnel that forwards to
+`http://127.0.0.1:8111`; use a TLS or mTLS tunnel for MCP as well.
 
 ## Security Considerations
 
 - Consider setting up a firewall
-- Use HTTPS in production
-- Implement authentication if needed
+- Use a TLS proxy or tunnel for every remote client
+- Keep `API_KEY` and `MCP_TOKEN` configured in production
 - Keep the system updated
 
 ## Performance Tips

@@ -1,0 +1,7 @@
+flowchart LR
+  L["Local client"] --> H["HTTP loopback listener"]
+  L --> M["MCP loopback listener\nhandshake + idle limits"]
+  P["TLS proxy or tunnel"] --> H
+  P --> M
+  H --> B["BLE manager"]
+  M --> B

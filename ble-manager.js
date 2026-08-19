@@ -10,8 +10,45 @@ console.log('noble'); // Initial log to indicate noble module is being processed
 
 // Stores discovered peripheral objects.
 var discoveredPeripherals = [];
+const discoveryLastSeen = new Map();
+const discoveryMaxEntries = positiveIntegerFromEnv('BLE_DISCOVERY_MAX_ENTRIES', 256);
+const discoveryTtlMs = positiveIntegerFromEnv('BLE_DISCOVERY_TTL_MS', 15 * 60 * 1000);
 // Stores currently connected peripheral objects, keyed by peripheral ID.
 var connectedPeripherals = {};
+
+function positiveIntegerFromEnv(name, fallback) {
+  const parsed = parseInt(process.env[name] || '', 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function pruneDiscoveredPeripherals(now = Date.now()) {
+  for (let index = discoveredPeripherals.length - 1; index >= 0; index -= 1) {
+    const peripheral = discoveredPeripherals[index];
+    const lastSeen = discoveryLastSeen.get(peripheral.id) || 0;
+    if (!connectedPeripherals[peripheral.id] && now - lastSeen >= discoveryTtlMs) {
+      discoveredPeripherals.splice(index, 1);
+      discoveryLastSeen.delete(peripheral.id);
+    }
+  }
+}
+
+function evictLeastRecentlySeenPeripheral() {
+  let oldestIndex = -1;
+  let oldestSeen = Infinity;
+  for (let index = 0; index < discoveredPeripherals.length; index += 1) {
+    const peripheral = discoveredPeripherals[index];
+    if (connectedPeripherals[peripheral.id]) continue;
+    const lastSeen = discoveryLastSeen.get(peripheral.id) || 0;
+    if (lastSeen < oldestSeen) {
+      oldestSeen = lastSeen;
+      oldestIndex = index;
+    }
+  }
+  if (oldestIndex < 0) return false;
+  const [evicted] = discoveredPeripherals.splice(oldestIndex, 1);
+  discoveryLastSeen.delete(evicted.id);
+  return true;
+}
 
 // Handles state changes in the BLE adapter (e.g., powered on, powered off).
 noble.on('stateChange', function(state) {
@@ -35,10 +72,21 @@ noble.on('scanStop', function() {
 
 // Fired when a BLE peripheral is discovered.
 noble.on('discover', function(peripheral) {
+  const now = Date.now();
+  pruneDiscoveredPeripherals(now);
   // Check if the peripheral is already in the list to avoid duplicates.
-  if (!discoveredPeripherals.find(p => p.id === peripheral.id)) {
+  const existing = discoveredPeripherals.find(p => p.id === peripheral.id);
+  if (existing) {
+    discoveryLastSeen.set(peripheral.id, now);
+    return;
+  }
+  while (discoveredPeripherals.length >= discoveryMaxEntries && evictLeastRecentlySeenPeripheral()) {
+    // Continue evicting until the new entry can fit.
+  }
+  if (discoveredPeripherals.length < discoveryMaxEntries) {
     console.log('on -> discover: ' + peripheral.id + ' (' + (peripheral.advertisement.localName || 'Unknown') + ')');
     discoveredPeripherals.push(peripheral); // Add new peripheral to the list.
+    discoveryLastSeen.set(peripheral.id, now);
   }
 });
 
@@ -49,6 +97,7 @@ noble.on('discover', function(peripheral) {
  *                          with properties like id, address, name, advertisedServices, and state.
  */
 function getDiscoveredPeripherals() {
+  pruneDiscoveredPeripherals();
   return discoveredPeripherals.map(peripheral => ({
     id: peripheral.id,
     address: peripheral.address,
@@ -70,6 +119,7 @@ function getDiscoveredPeripherals() {
  *                  or if connection/discovery fails.
  */
 async function connectDevice(peripheralId) {
+  pruneDiscoveredPeripherals();
   const peripheral = discoveredPeripherals.find(p => p.id === peripheralId);
 
   if (!peripheral) {
@@ -472,6 +522,7 @@ async function unsubscribeFromCharacteristic(peripheralId, characteristicUuid) {
 module.exports = {
   noble, // The noble instance itself, for direct use if needed.
   discoveredPeripherals, // Raw array of discovered noble peripheral objects.
+  pruneDiscoveredPeripherals,
   getDiscoveredPeripherals, // Function to get formatted list of discovered peripherals.
   connectedPeripherals, // Object storing currently connected noble peripheral objects.
   connectDevice, // Function to connect to a device.

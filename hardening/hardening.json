@@ -1,0 +1,63 @@
+{
+  "documentType": "codex-security.hardening-analysis",
+  "schemaVersion": "1.0",
+  "analysisId": "hardening_final",
+  "sourceScan": {
+    "scanId": "a46a41b5-0388-4e82-b8e5-6f84af5de155",
+    "targetRevision": "4d2a211409bb25b42c09249d6543bae8eac194d3",
+    "sourceDrift": "none"
+  },
+  "assessment": {
+    "outcome": "opportunities_identified",
+    "summary": "The evidence supports a shared ingress boundary for remote BLE authority and a separate bounded-lifetime design for BLE discovery state."
+  },
+  "constraints": {
+    "profile": "balanced",
+    "changeHorizons": ["incremental", "medium_term"],
+    "nonNegotiables": ["Preserve loopback development use", "Do not claim TLS merely because a deployment guide recommends a proxy"],
+    "assumptions": ["No measured latency, BLE device-count, or memory budget was supplied.", "Remote deployments may use a reverse proxy or a TLS tunnel, but current source does not enforce either."]
+  },
+  "opportunities": [
+    {
+      "opportunityId": "trusted-ble-ingress",
+      "title": "Establish one trusted ingress boundary for BLE authority",
+      "summary": "Make listener exposure, TLS termination, authentication, and connection admission explicit rather than inferring safety from NODE_ENV.",
+      "diagnosis": "HTTP and raw MCP listeners independently own optional authentication and bind behavior, while MCP allocates unauthenticated connection state before enforcing limits.",
+      "evidence": [
+        {"claimType":"observed","sourceKind":"finding","findingId":"csf_17b92e19c95170922c9e1161","path":"server.js","claim":"Normal startup allows BLE control without credentials outside production mode."},
+        {"claimType":"observed","sourceKind":"finding","findingId":"csf_d3ce55de93873aa94d30c900","path":"mcp-server.js","claim":"The raw TCP MCP transport carries bearer credentials without process-level TLS."},
+        {"claimType":"observed","sourceKind":"finding","findingId":"csf_f43619fa54f919391a51ead0","path":"mcp-server.js","claim":"Accepted MCP sockets have no handshake deadline or admission cap."}
+      ],
+      "desiredInvariants": [
+        "A non-loopback BLE control listener cannot start without authentication and an approved protected transport.",
+        "A credential is accepted only in a request header or protected MCP authentication frame, never in a URL.",
+        "Unauthenticated MCP peers have bounded time and connection state."
+      ],
+      "proposalPath": "proposals/trusted-ble-ingress.md",
+      "options": [
+        {"optionId":"local-listener-hardening","title":"Fail-closed local listeners","kind":"baseline","diagramPaths":{"before":"diagrams/trusted-ble-ingress-before.mmd","after":"diagrams/trusted-ble-ingress-local-listener-hardening-after.mmd"},"findingCoverage":[{"findingId":"csf_17b92e19c95170922c9e1161","effect":"addresses","tacticalFixRequired":true,"rationale":"Require secrets for non-loopback binding and default to loopback."},{"findingId":"csf_d3ce55de93873aa94d30c900","effect":"mitigates","tacticalFixRequired":true,"rationale":"Remote access is moved behind a TLS-capable deployment component; query credentials are removed."},{"findingId":"csf_f43619fa54f919391a51ead0","effect":"addresses","tacticalFixRequired":true,"rationale":"Add handshake timeout, idle timeout, and client caps."}],"tradeoffs":[{"dimension":"security","direction":"improves","confidence":"high","basis":"source-derived","assessment":"Removes the insecure default and bounds pre-auth state.","validationPlan":"Exercise startup and unauthenticated-command tests."},{"dimension":"performance","direction":"neutral","confidence":"medium","basis":"source-derived","assessment":"Timeout checks add no steady-state protocol hop.","validationPlan":"Compare authenticated command latency."},{"dimension":"memory","direction":"improves","confidence":"high","basis":"source-derived","assessment":"Connection caps bound retained socket state.","validationPlan":"Load idle connections to the cap."},{"dimension":"reliability","direction":"improves","confidence":"medium","basis":"source-derived","assessment":"Overload is rejected rather than exhausting the process.","validationPlan":"Verify legitimate clients connect during connection pressure."},{"dimension":"operability","direction":"regresses","confidence":"medium","basis":"source-derived","assessment":"Remote users need an explicit TLS proxy or tunnel.","validationPlan":"Document and test one supported deployment."},{"dimension":"migration","direction":"neutral","confidence":"high","basis":"source-derived","assessment":"Existing loopback development can remain explicitly supported.","validationPlan":"Run existing REST and MCP tests with loopback configuration."}]},
+        {"optionId":"gateway-terminated-transport","title":"Dedicated TLS gateway with local-only services","kind":"structural","diagramPaths":{"before":"diagrams/trusted-ble-ingress-before.mmd","after":"diagrams/trusted-ble-ingress-gateway-terminated-transport-after.mmd"},"findingCoverage":[{"findingId":"csf_17b92e19c95170922c9e1161","effect":"addresses","tacticalFixRequired":true,"rationale":"Only the gateway is network-facing; local services still fail closed."},{"findingId":"csf_d3ce55de93873aa94d30c900","effect":"addresses","tacticalFixRequired":true,"rationale":"Gateway terminates HTTPS and an mTLS/TLS MCP tunnel."},{"findingId":"csf_f43619fa54f919391a51ead0","effect":"addresses","tacticalFixRequired":true,"rationale":"Gateway and process both enforce admission limits."}],"tradeoffs":[{"dimension":"security","direction":"improves","confidence":"high","basis":"source-derived","assessment":"Centralizes remote exposure and transport policy.","validationPlan":"Verify direct ports are unreachable and gateway authentication is required."},{"dimension":"performance","direction":"regresses","confidence":"medium","basis":"analogous","assessment":"TLS termination introduces a network hop and cryptographic work.","validationPlan":"Benchmark BLE command latency through the gateway."},{"dimension":"memory","direction":"unknown","confidence":"low","basis":"hypothetical","assessment":"Gateway buffers and sessions depend on the selected component.","validationPlan":"Measure RSS and open connections under load."},{"dimension":"reliability","direction":"improves","confidence":"medium","basis":"analogous","assessment":"Gateway overload need not consume the BLE process, but it becomes a dependency.","validationPlan":"Test gateway restart and overload behavior."},{"dimension":"operability","direction":"regresses","confidence":"high","basis":"source-derived","assessment":"Certificates, proxy configuration, and monitoring become required.","validationPlan":"Perform a staging certificate rotation drill."},{"dimension":"migration","direction":"regresses","confidence":"medium","basis":"source-derived","assessment":"Remote clients must target supported TLS endpoints.","validationPlan":"Run a compatibility migration with one representative client."}]}
+      ],
+      "recommendedOptionId": "local-listener-hardening",
+      "recommendation": "Start with fail-closed local listeners and specify one TLS deployment path. Adopt the dedicated gateway when remote access is a supported product requirement rather than an operator exception."
+    },
+    {
+      "opportunityId": "bounded-ble-discovery",
+      "title": "Give BLE discovery state an owned lifetime and capacity",
+      "summary": "Replace the unbounded global array with a bounded discovery registry whose entries expire predictably.",
+      "diagnosis": "The BLE adapter is an attacker-influenced input boundary, but discovered peripherals are retained indefinitely and no component owns eviction policy.",
+      "evidence": [
+        {"claimType":"observed","sourceKind":"finding","findingId":"csf_730757dc1b653ba31c4c4037","path":"ble-manager.js","claim":"Every new BLE peripheral identifier is appended to a global array with no eviction path."}
+      ],
+      "desiredInvariants": ["Discovery metadata has a configured upper bound.", "Stale, disconnected discovery entries expire without an API request.", "Enumeration and connection lookup remain predictable under advertisement churn."],
+      "proposalPath": "proposals/bounded-ble-discovery.md",
+      "options": [
+        {"optionId":"ttl-lru-registry","title":"Bounded TTL/LRU discovery registry","kind":"incremental","diagramPaths":{"before":"diagrams/bounded-ble-discovery-before.mmd","after":"diagrams/bounded-ble-discovery-ttl-lru-registry-after.mmd"},"findingCoverage":[{"findingId":"csf_730757dc1b653ba31c4c4037","effect":"addresses","tacticalFixRequired":true,"rationale":"The registry enforces count and age limits at the input boundary."}],"tradeoffs":[{"dimension":"security","direction":"improves","confidence":"high","basis":"source-derived","assessment":"Advertisement churn cannot grow retained state beyond the configured cap.","validationPlan":"Inject unique advertisements beyond the cap."},{"dimension":"performance","direction":"neutral","confidence":"medium","basis":"source-derived","assessment":"Map lookup and bounded eviction replace linear duplicate search.","validationPlan":"Benchmark enumeration and lookup at expected device counts."},{"dimension":"memory","direction":"improves","confidence":"high","basis":"source-derived","assessment":"The cap creates a deterministic ceiling.","validationPlan":"Measure peak retained entries and RSS under churn."},{"dimension":"reliability","direction":"improves","confidence":"medium","basis":"source-derived","assessment":"Stale entries may expire before a delayed connection request.","validationPlan":"Test reconnect behavior across the TTL boundary."},{"dimension":"operability","direction":"neutral","confidence":"medium","basis":"source-derived","assessment":"Cap and TTL require documented defaults and metrics.","validationPlan":"Emit eviction counters and review them in staging."},{"dimension":"migration","direction":"neutral","confidence":"high","basis":"source-derived","assessment":"The existing API can return the same formatted device records.","validationPlan":"Run existing BLE manager tests and API contract tests."}]},
+        {"optionId":"allowlisted-on-demand-scan","title":"On-demand discovery with device allowlisting","kind":"structural","diagramPaths":{"before":"diagrams/bounded-ble-discovery-before.mmd","after":"diagrams/bounded-ble-discovery-allowlisted-on-demand-scan-after.mmd"},"findingCoverage":[{"findingId":"csf_730757dc1b653ba31c4c4037","effect":"addresses","tacticalFixRequired":true,"rationale":"Scanning and retention are limited to approved devices and requested windows."}],"tradeoffs":[{"dimension":"security","direction":"improves","confidence":"high","basis":"source-derived","assessment":"Reduces both received advertisement volume and discoverable device exposure.","validationPlan":"Verify unknown devices are never retained."},{"dimension":"performance","direction":"unknown","confidence":"low","basis":"hypothetical","assessment":"Scanning begins on demand and may delay first device discovery.","validationPlan":"Measure time-to-discovery for representative devices."},{"dimension":"memory","direction":"improves","confidence":"high","basis":"source-derived","assessment":"Only allowlisted devices are retained during a bounded scan window.","validationPlan":"Measure state under advertisement churn."},{"dimension":"reliability","direction":"regresses","confidence":"medium","basis":"source-derived","assessment":"New or replacement devices require allowlist management.","validationPlan":"Test operational device enrollment and recovery."},{"dimension":"operability","direction":"regresses","confidence":"high","basis":"source-derived","assessment":"Operators must own device identity lifecycle.","validationPlan":"Review allowlist update and audit procedures."},{"dimension":"migration","direction":"regresses","confidence":"medium","basis":"source-derived","assessment":"Open discovery clients must move to a managed enrollment model.","validationPlan":"Pilot with a subset of known devices."}]}
+      ],
+      "recommendedOptionId": "ttl-lru-registry",
+      "recommendation": "Use a bounded TTL/LRU registry now; reserve allowlisting and on-demand scanning for deployments that already have a stable device inventory."
+    }
+  ],
+  "openQuestions": ["Which remote deployment model should be supported for MCP: local tunnel, mTLS proxy, or an in-process TLS endpoint?", "What device count, TTL, and discovery-capacity budget reflect production BLE fleets?"]
+}

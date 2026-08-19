@@ -1,0 +1,5 @@
+flowchart LR
+  A["Nearby BLE advertiser"] --> N["noble discover event"]
+  N --> R["Discovery registry\nTTL + LRU + cap"]
+  R --> API["Bounded enumeration and lookup"]
+  API --> B["Connected device map"]

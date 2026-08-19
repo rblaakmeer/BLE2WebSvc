@@ -77,6 +77,7 @@ This document outlines the security improvements made to BLE2WebSvc and provides
   export API_KEY=$(openssl rand -hex 32)
   ```
 - [ ] Enable HTTPS/TLS at the reverse proxy or load balancer
+- [ ] Keep HTTP and MCP application listeners bound to loopback; do not expose their ports directly
 - [ ] Use a reverse proxy (nginx, Apache, HAProxy) with:
   - SSL/TLS termination
   - Rate limiting and DDoS protection
@@ -99,6 +100,8 @@ This document outlines the security improvements made to BLE2WebSvc and provides
 ```bash
 MCP_TOKEN=<secure-random-token>              # Required for MCP authentication
 API_KEY=<secure-random-key>                  # Required in production for REST API authentication
+HOST=127.0.0.1                               # HTTP listener is loopback-only
+MCP_HOST=127.0.0.1                           # MCP listener is loopback-only
 CORS_ORIGIN=https://example.com              # Restrict to specific origin(s)
 SERVE_STATIC=false                           # Disable if not needed
 ALLOW_INSECURE_PRODUCTION=true               # Only for trusted isolated deployments without auth secrets
@@ -135,14 +138,14 @@ The MCP server requires authentication if `MCP_TOKEN` is set:
 ```
 
 ### REST API
-If `API_KEY` is set, include it in all requests:
+If `API_KEY` is set, include it in all requests using the header only:
 
 ```bash
 # Option 1: Header
 curl -H "x-api-key: <API_KEY>" http://localhost:8111/ble/devices
 
-# Option 2: Query parameter
-curl http://localhost:8111/ble/devices?api_key=<API_KEY>
+Query-string API keys are rejected because URLs are frequently retained in logs
+and browser history.
 ```
 
 ---

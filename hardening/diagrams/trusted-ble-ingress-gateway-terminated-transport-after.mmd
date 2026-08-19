@@ -1,0 +1,6 @@
+flowchart LR
+  A["Remote client"] --> G["TLS / mTLS gateway\nauth + admission"]
+  G --> H["HTTP loopback listener"]
+  G --> M["MCP loopback listener"]
+  H --> B["BLE manager"]
+  M --> B

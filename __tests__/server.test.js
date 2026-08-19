@@ -287,6 +287,25 @@ describe('BLE API Endpoints', () => {
 
       expect(() => app.validateProductionSecurityConfig()).not.toThrow();
     });
+
+    it('should refuse a non-loopback HTTP listener in every environment', () => {
+      process.env = { ...originalEnv, HOST: '0.0.0.0' };
+
+      expect(() => app.validateProductionSecurityConfig()).toThrow(/outside loopback/);
+    });
+
+    it('should accept an API key only in the request header', async () => {
+      process.env = { ...originalEnv, API_KEY: 'rest-secret' };
+      bleManager.getDiscoveredPeripherals.mockReturnValue([]);
+
+      const queryResponse = await request(app).get('/ble/devices?api_key=rest-secret');
+      const headerResponse = await request(app)
+        .get('/ble/devices')
+        .set('x-api-key', 'rest-secret');
+
+      expect(queryResponse.status).toBe(401);
+      expect(headerResponse.status).toBe(200);
+    });
   });
 
 });

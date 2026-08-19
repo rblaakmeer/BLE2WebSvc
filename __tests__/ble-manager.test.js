@@ -42,6 +42,27 @@ describe('BLEManager', () => {
       expect(discovered[0].id).toBe('p1');
       expect(discovered[0].name).toBe('Test Peripheral');
     });
+
+    it('should expire stale disconnected peripherals', () => {
+      const nowSpy = jest.spyOn(Date, 'now');
+      nowSpy.mockReturnValue(1_000);
+      mockNoble._discover(new MockPeripheral('stale-device', 'Stale Device'));
+
+      nowSpy.mockReturnValue(1_000 + (15 * 60 * 1000) + 1);
+      expect(bleManager.getDiscoveredPeripherals()).toEqual([]);
+      nowSpy.mockRestore();
+    });
+
+    it('should keep the discovery registry bounded during identifier churn', () => {
+      for (let index = 0; index < 257; index += 1) {
+        mockNoble._discover(new MockPeripheral(`device-${index}`, `Device ${index}`));
+      }
+
+      const discovered = bleManager.getDiscoveredPeripherals();
+      expect(discovered).toHaveLength(256);
+      expect(discovered.find(device => device.id === 'device-0')).toBeUndefined();
+      expect(discovered.find(device => device.id === 'device-256')).toBeDefined();
+    });
   });
 
   // Test suite for device connection

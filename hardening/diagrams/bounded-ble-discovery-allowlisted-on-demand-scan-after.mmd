@@ -1,0 +1,5 @@
+flowchart LR
+  A["Nearby BLE advertiser"] --> N["Timed noble scan"]
+  L["Managed allowlist"] --> R["Bounded registry"]
+  N --> R
+  R --> API["Known-device API"]
